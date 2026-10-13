@@ -1,0 +1,20 @@
+{
+  "name": "sleekboard_server",
+  "version": "1.0.0",
+  "description": "Express + MongoDB API for SleekBoard",
+  "main": "src/server.js",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "http-status-codes": "^2.3.0",
+    "mongoose": "^8.19.0"
+  }
+}
