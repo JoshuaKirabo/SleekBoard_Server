@@ -15,8 +15,16 @@ export const errorHandler = (error, req, res, next) =>
 
     if(error.name === "CastError")
       {
-        status = StatusCodes.NOT_FOUND;
-        message = `No record found with id ${error.value}`;
+        // A bad id means the record doesn't exist. Any other path is a bad value in the body.
+        const badId = error.path === "_id";
+        status = badId ? StatusCodes.NOT_FOUND : StatusCodes.BAD_REQUEST;
+        message = badId ? `No record found with id ${error.value}` : `${error.path} should be a ${error.kind}.`;
+      }
+
+    if(error.type === "entity.too.large")
+      {
+        status = StatusCodes.REQUEST_TOO_LONG;
+        message = "That's too big to save. Try a smaller logo.";
       }
 
     if(error.code === 11000)
@@ -27,5 +35,7 @@ export const errorHandler = (error, req, res, next) =>
 
     if(status >= 500) console.error(error);
 
-    res.status(status).json({ message, ...(process.env.NODE_ENV !== "production" && { stack: error.stack }) });
+    // Stacks are opt-in: only `npm run dev` sets NODE_ENV=development. A deploy that forgets NODE_ENV stays quiet
+    // instead of handing out file paths.
+    res.status(status).json({ message, ...(process.env.NODE_ENV === "development" && { stack: error.stack }) });
   };
