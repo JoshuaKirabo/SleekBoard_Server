@@ -3,6 +3,7 @@ import http from "node:http";
 import https from "node:https";
 import { BlockList, isIP } from "node:net";
 import zlib from "node:zlib";
+import { PlaceName } from "./PlaceName.js";
 
 // Reads a job posting from its link. Most job sites embed a schema.org JobPosting block so Google can list the role,
 // and that block is the best source we have: title, employer, location and closing date, all labelled. When a page
@@ -270,21 +271,18 @@ const isoDate = (value) =>
     return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
   };
 
-// One place, written the way you'd say it. Workday writes "US, CA, Santa Clara", country first, so a leading
-// two-letter code flips the order and drops off. Repeats like "Singapore, Singapore" collapse.
+// One place, written the way the rest of the board writes it: "City, ST" in the US, the site's own words elsewhere.
+// PlaceName does the work, so Workday's country-first "USA - CA - Folsom" and a plain "Santa Clara, California" come
+// out the same.
+const placeNames = new PlaceName();
+
 const placeName = (place) =>
   {
     const address = place?.address ?? place;
-    if(typeof address === "string") return decode(address);
+    if(typeof address === "string") return placeNames.format(decode(address));
     if(!address) return "";
-
-    let parts = String(address.addressLocality || "").split(",").map((part) => part.trim()).filter(Boolean);
-    if(parts.length > 1 && /^[A-Z]{2}$/.test(parts[0])) parts = parts.slice(1).reverse();
-    const region = address.addressRegion?.trim();
     const country = typeof address.addressCountry === "string" ? address.addressCountry : address.addressCountry?.name;
-    if(region && !parts.includes(region)) parts.push(region);
-    if(!parts.length && country) parts.push(country);
-    return decode(parts.filter((part, index) => part !== parts[index - 1]).join(", "));
+    return placeNames.fromAddress({ locality: decode(String(address.addressLocality || "")), region: decode(String(address.addressRegion || "")), country: decode(String(country || "")) });
   };
 
 const locationOf = (posting) =>
@@ -368,9 +366,11 @@ const readGreenhouse = async (url) =>
     const response = await fetch(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs/${jobId}`, { signal: AbortSignal.timeout(TIMEOUT) }).catch(() => null);
     if(!response?.ok) return null;
     const job = await response.json();
-    // Greenhouse joins several offices with " | ". Keep the first and count the rest, like the other boards.
-    const places = (job.location?.name || "").split("|").map((place) => place.trim()).filter(Boolean);
-    return { company: job.company_name || "", role: decode(job.title), location: places[0] ? `${places[0]}${places.length > 1 ? ` +${places.length - 1}` : ""}` : "", deadline: "", website: "", source: "greenhouse" };
+    // Greenhouse boards join several offices with " | " or " • ". Keep the first and count the rest, like the other
+    // boards.
+    const offices = (job.location?.name || "").split(/[|•]/).map((office) => office.trim()).filter(Boolean);
+    const first = placeNames.format(decode(offices[0] || ""));
+    return { company: job.company_name || "", role: decode(job.title), location: first ? `${first}${offices.length > 1 ? ` +${offices.length - 1}` : ""}` : "", deadline: "", website: "", source: "greenhouse" };
   };
 
 // ---------- Fallback: preview tags and the tab title ----------
