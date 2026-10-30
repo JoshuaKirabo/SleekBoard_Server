@@ -2,6 +2,7 @@ import { Router } from "express";
 import healthRoutes from "./health.route.js";
 import logosRoutes from "./logos.route.js";
 import jobsRoutes from "./jobs.route.js";
+import runsRoutes from "./runs.route.js";
 
 const router = Router();
 
@@ -9,5 +10,6 @@ const router = Router();
 router.use("/health", healthRoutes);
 router.use("/logos", logosRoutes);
 router.use("/jobs", jobsRoutes);
+router.use("/runs", runsRoutes);
 
 export default router;

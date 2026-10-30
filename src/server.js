@@ -1,6 +1,7 @@
 import "dotenv/config";
 import app from "./app.js";
 import { connectDB } from "./config/db.js";
+import { runStore } from "./agent/container.js";
 
 const PORT = process.env.PORT || 5050;
 // Only this Mac can reach it. Leaving the host off listens on every network, so anyone on the same Wi-Fi could hit
@@ -32,6 +33,8 @@ const start = async () =>
     try
       {
         await connectDB(process.env.MONGODB_URI || process.env.MONGO_URI);
+        // Runs that were mid-way when the server last stopped can't finish now, so they get marked failed.
+        await runStore.failInterrupted();
         // Express 5 hands a failed listen (port taken, bad host) to this callback instead of throwing, so check for it.
         app.listen(PORT, HOST, (error) =>
           {

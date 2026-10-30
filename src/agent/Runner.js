@@ -1,0 +1,93 @@
+import { StatusCodes } from "http-status-codes";
+import { Deadline } from "./Deadline.js";
+
+// How long a whole run gets. Runs should take 30 to 90 seconds, so this is double the slowest.
+const RUN_MS = 3 * 60_000;
+
+// Runs agents in the background. Pressing Run gets a reply straight away, and the work carries on here, two at a time
+// so 80 jobs can't all fire at once and choke the database.
+//
+// Everything it uses gets handed in: tasks says what each kind of run does, buildAgent makes an agent for a task, and
+// logFor makes one run's log. Tests swap all three for fakes.
+export class Runner
+  {
+    constructor({ store, cap, tasks, buildAgent, logFor, slots = 2, runMs = RUN_MS })
+      {
+        this.store = store;
+        this.cap = cap;
+        this.tasks = tasks;
+        this.buildAgent = buildAgent;
+        this.logFor = logFor;
+        this.slots = slots;
+        this.runMs = runMs;
+        this.queue = [];
+        this.running = new Set();
+      }
+
+    // Saves a new run and puts it in line. Gives the run back right away, while it's still queued.
+    async submit(kind, jobId)
+      {
+        const task = this.taskFor(kind);
+        await this.cap.check();
+        const run = await this.store.create({ kind, job: jobId });
+        this.enqueue({ run, task });
+        return run;
+      }
+
+    taskFor(kind)
+      {
+        const task = this.tasks.get(kind);
+        if(!task) throw Object.assign(new Error(`There's no "${kind}" run yet.`), { status: StatusCodes.BAD_REQUEST });
+        return task;
+      }
+
+    enqueue(item)
+      {
+        this.queue.push(item);
+        this.next();
+      }
+
+    // Fills any free slots from the front of the line.
+    next()
+      {
+        while(this.running.size < this.slots && this.queue.length) this.launch(this.queue.shift());
+      }
+
+    // Holds a slot for as long as one run takes, then hands it to whoever's next. The catch is there because a
+    // promise nobody catches would crash the whole server.
+    launch(item)
+      {
+        const work = this.execute(item)
+          .catch((error) => console.error(`Run ${item.run.id} couldn't save its result:`, error.message))
+          .finally(() =>
+            {
+              this.running.delete(work);
+              this.next();
+            });
+        this.running.add(work);
+      }
+
+    // One run start to finish, against the run's clock. When time's up the run fails and its slot frees up, even if
+    // something inside never answers. Whatever goes wrong ends up on the run as its error, so the card can show it.
+    async execute({ run, task })
+      {
+        const log = this.logFor(run.id);
+        const deadline = new Deadline(this.runMs, "This run");
+        try
+          {
+            await log.start();
+            const agent = this.buildAgent({ task, log, signal: deadline.signal });
+            await log.finish(await deadline.race(Promise.resolve().then(() => task.brief(run)).then((brief) => agent.run(brief))));
+          }
+        catch(error)
+          {
+            await log.fail(error);
+          }
+      }
+
+    // Waits until nothing is queued or running. Tests use it, and so could a clean shutdown.
+    async idle()
+      {
+        while(this.running.size || this.queue.length) await Promise.allSettled([...this.running]);
+      }
+  }
