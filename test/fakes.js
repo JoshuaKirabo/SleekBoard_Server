@@ -118,9 +118,10 @@ export class MemoryRunStore
         return run;
       }
 
+    // Same rule as RunStore: email checks don't count as runs.
     async countSince(date)
       {
-        return this.runs.filter((run) => run.createdAt >= date).length;
+        return this.runs.filter((run) => run.createdAt >= date && run.kind !== "email").length;
       }
 
     // Same rule as RunStore: a run that hasn't ended counts as its whole budget, or what it's spent if that's more.
@@ -160,7 +161,7 @@ export class FakeFetch
 export const jsonResponse = (status, body) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 // The Job model's update calls, over plain objects in memory. It understands only the filters and operators the lane
-// history and the reply desk use: _id, status and moves.$size, then $set, $push and $pop.
+// history, the reply desk and the email check use: _id, status and moves.$size, then $set, $push and $pop.
 export class MemoryJobs
   {
     constructor(jobs = [])
@@ -172,6 +173,13 @@ export class MemoryJobs
       {
         const job = this.jobs.get(id);
         return job ? structuredClone(job) : null;
+      }
+
+    // Only { status: { $in: [...] } }, what the email check asks for.
+    async find(filter = {})
+      {
+        const lanes = filter.status?.$in;
+        return [...this.jobs.values()].filter((job) => !lanes || lanes.includes(job.status)).map((job) => structuredClone(job));
       }
 
     async findOneAndUpdate(filter, update)

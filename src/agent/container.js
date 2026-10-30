@@ -20,6 +20,18 @@ import { Job } from "../models/job.model.js";
 import { fetchPage, readJob } from "../services/jobReader.js";
 import { contactBook, jobCard } from "../services/contacts/index.js";
 import { SuggestionDesk } from "../services/contacts/SuggestionDesk.js";
+import { EmailTask } from "./tasks/EmailTask.js";
+import { Mailbox } from "../models/mailbox.model.js";
+import { replyDesk, laneMove } from "../services/email/index.js";
+import { ReplyCheck } from "../services/email/ReplyCheck.js";
+import { GmailApi } from "../services/email/GmailApi.js";
+import { GmailSearch } from "../services/email/GmailSearch.js";
+import { MailMessage } from "../services/email/MailMessage.js";
+import { MailboxStore } from "../services/email/MailboxStore.js";
+import { ReplySorter } from "../services/email/ReplySorter.js";
+import { ReplyMatch } from "../services/email/ReplyMatch.js";
+import { ReplyAi } from "../services/email/ReplyAi.js";
+import { MailTimer } from "../services/email/MailTimer.js";
 
 // The one place that builds the real thing. Every class above gets what it needs through its constructor, and this
 // file is where those pieces meet, like Spring's wiring without Spring. Tests skip this file and build their own.
@@ -67,12 +79,32 @@ const schools = [];
 // Fill in's first look at a link: is it a job at all? On the bottom rung, the cheapest model we have.
 const postingCheck = new PostingCheck({ clientFor: () => clientFor(ladder.pick(1, "json")), fetchPage });
 
+// The email check. The AI reads unclear replies on the bottom rung, like the posting check.
+const replyMatch = new ReplyMatch();
+const replyCheck = new ReplyCheck(
+  {
+    gmail: new GmailApi(),
+    search: new GmailSearch(),
+    reader: new MailMessage(),
+    mailbox: new MailboxStore({ Mailbox }),
+    jobs: Job,
+    sorter: new ReplySorter(),
+    match: replyMatch,
+    ai: new ReplyAi({ clientFor: () => clientFor(ladder.pick(1, "json")), match: replyMatch }),
+    lanes: laneMove,
+    desk: replyDesk,
+  });
+
+// Connect Gmail is the next piece. Until it's built no inbox is connected, so the timer never starts a check.
+const gmailTokens = { connected: async () => false, access: async () => "" };
+
 // Every kind of run the server knows, by the kind a run is saved with.
 const tasks = new Map(
   [
     ["contact", new ContactTask({ jobs: Job, exa, fetchPage, schools })],
     ["note", new NoteTask({ jobs: Job, contacts: contactBook, fetchPage })],
     ["fill", new FillTask({ readJob, check: postingCheck, exa, fetchPage, store: runStore, schools })],
+    ["email", new EmailTask({ check: replyCheck, tokens: gmailTokens })],
   ]);
 
 // A task can still set its own budget.
@@ -80,3 +112,9 @@ export const runner = new Runner({ store: runStore, cap, tasks, buildAgent, logF
 
 // Where you say yes or no to a run's suggestions. Built here because it reads runs.
 export const suggestionDesk = new SuggestionDesk({ runs: runStore, jobs: Job, book: contactBook, card: jobCard });
+
+// How often the inbox is checked. JobNavigator's default.
+const MAIL_EVERY_MS = 30 * 60_000;
+
+// Started by server.js once Mongo's up.
+export const mailTimer = new MailTimer({ runner, store: runStore, tokens: gmailTokens, everyMs: MAIL_EVERY_MS });

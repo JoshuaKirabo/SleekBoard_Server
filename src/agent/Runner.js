@@ -23,7 +23,8 @@ export const RUN_USD = 0.1;
 // A task's start(run, { log, signal, budget }) gives back that run's work: brief() for the agent, tools() it may use, built fresh for the run,
 // and result(answer), which turns the agent's final answer into what the run saves. A task that needs more than the
 // job, like the contact a note is for, also has inputFor(input, jobId), which checks what was sent and gives back
-// what the run should keep, before the run is saved or counted.
+// what the run should keep, before the run is saved or counted. A task whose work has perform() instead, like the
+// email check, gets no agent: perform() does the work and gives back what the run saves.
 export class Runner
   {
     constructor({ store, cap, tasks, buildAgent, logFor, slots = 2, runMs = RUN_MS, admitMs = ADMIT_MS, runUsd = RUN_USD })
@@ -128,6 +129,8 @@ export class Runner
       {
         const budget = new RunBudget(run.budget);
         const work = await task.start(run, { log, signal, budget });
+        // A task that does its own work, like the email check, has no agent to build.
+        if(work.perform) return work.perform();
         const agent = this.buildAgent({ task, tools: work.tools(), log, signal, budget });
         return work.result(await agent.run(work.brief()));
       }

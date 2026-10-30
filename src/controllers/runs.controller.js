@@ -25,6 +25,7 @@ export const listRuns = async (req, res) =>
 // Fill in is the one kind with no job yet: { kind: "fill", link }. Its job comes later, through attachRun.
 export const createRun = async (req, res) =>
   {
+    if(req.body?.kind === "email") return res.status(StatusCodes.BAD_REQUEST).json({ message: "Email checks start on their own." });
     if(req.body?.kind === "fill") return res.status(StatusCodes.ACCEPTED).json(await runner.submit("fill", undefined, { link: req.body?.link }));
     const jobId = String(req.body?.job || "").trim();
     if(!jobId) return res.status(StatusCodes.BAD_REQUEST).json({ message: "Send the job's id." });

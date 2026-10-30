@@ -1,0 +1,99 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { MailTimer } from "../../src/services/email/MailTimer.js";
+import { EmailTask } from "../../src/agent/tasks/EmailTask.js";
+import { Runner } from "../../src/agent/Runner.js";
+import { SpendingCap } from "../../src/agent/SpendingCap.js";
+import { MemoryLog, MemoryRunStore } from "../fakes.js";
+
+const connected = { connected: async () => true, access: async () => "tok" };
+const offline = { connected: async () => false, access: async () => "" };
+
+// A runner and store that remember what was submitted, with runs that stay in whatever status the test sets.
+const timerWith = (tokens, status = "running") =>
+  {
+    const submitted = [];
+    const runner = { submit: async (kind) => (submitted.push(kind), { id: `run-${submitted.length}` }) };
+    const store = { find: async (id) => ({ id, status }) };
+    return { submitted, timer: new MailTimer({ runner, store, tokens, everyMs: 60_000 }) };
+  };
+
+test("nothing starts while Gmail isn't connected", async () =>
+  {
+    const { timer, submitted } = timerWith(offline);
+    assert.equal(await timer.tick(), null);
+    assert.deepEqual(submitted, []);
+  });
+
+test("a connected inbox gets an email run", async () =>
+  {
+    const { timer, submitted } = timerWith(connected, "done");
+    assert.equal((await timer.tick()).id, "run-1");
+    assert.deepEqual(submitted, ["email"]);
+  });
+
+test("a new check waits while the last one's still going", async () =>
+  {
+    const { timer, submitted } = timerWith(connected, "running");
+    await timer.tick();
+    assert.equal(await timer.tick(), null);
+    assert.deepEqual(submitted, ["email"]);
+  });
+
+test("once the last check has finished, the next one starts", async () =>
+  {
+    const { timer, submitted } = timerWith(connected, "done");
+    await timer.tick();
+    await timer.tick();
+    assert.deepEqual(submitted, ["email", "email"]);
+  });
+
+test("a check that can't start, like a full day's budget, is logged and doesn't throw", async () =>
+  {
+    const runner = { submit: async () => { throw new Error("Today's $1 AI budget is used up."); } };
+    const timer = new MailTimer({ runner, store: { find: async () => null }, tokens: connected, everyMs: 60_000 });
+    const warn = console.warn;
+    const warned = [];
+    console.warn = (...args) => warned.push(args.join(" "));
+    try
+      {
+        assert.equal(await timer.tick(), null);
+      }
+    finally
+      {
+        console.warn = warn;
+      }
+    assert.match(warned[0], /budget is used up/);
+  });
+
+test("the email task skips when Gmail has no token, and runs the check when it does", async () =>
+  {
+    const asked = [];
+    const check = { run: async (options) => (asked.push(options.token), { moved: 1 }) };
+    assert.deepEqual(await (await new EmailTask({ check, tokens: offline }).start({}, {})).perform(), { skipped: "Gmail isn't connected." });
+    assert.deepEqual(await (await new EmailTask({ check, tokens: connected }).start({}, {})).perform(), { moved: 1 });
+    assert.deepEqual(asked, ["tok"]);
+  });
+
+test("the runner runs a task with perform() without building an agent, and email checks don't use up the day's runs", async () =>
+  {
+    const store = new MemoryRunStore();
+    const logs = new Map();
+    const buildAgent = () =>
+      {
+        throw new Error("no agent should be built");
+      };
+    const tasks = new Map([["email", new EmailTask({ check: { run: async () => ({ moved: 2 }) }, tokens: connected })]]);
+    const logFor = (id) =>
+      {
+        logs.set(id, new MemoryLog());
+        return logs.get(id);
+      };
+    const runner = new Runner({ store, cap: new SpendingCap({ store, maxRuns: 1, maxUsd: 1 }), tasks, buildAgent, logFor });
+    const first = await runner.submit("email");
+    const second = await runner.submit("email");
+    await runner.idle();
+    assert.deepEqual(logs.get(first.id).result, { moved: 2 });
+    assert.deepEqual(logs.get(second.id).events, ["start", "finish"]);
+    assert.equal(first.budget, 0.02);
+  });

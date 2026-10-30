@@ -25,6 +25,12 @@ export class LaneMove
         return WAITING.includes(lane);
       }
 
+    // The lanes still waiting on a reply, for finding their cards.
+    waitingLanes()
+      {
+        return [...WAITING];
+      }
+
     // Where a card goes after the phrase lists sort its email, or null to leave it. A positive only moves a card that
     // hasn't been interviewed yet. A rejection ends any waiting card.
     afterPhrases(lane, kind)

@@ -120,7 +120,20 @@ export class ReplyAi
     // company really is the sender. Fails the company check and nothing moves, however sure the AI is.
     acts(answer, email)
       {
-        if(!answer || answer.confidence < SURE || answer.status === "no_change" || !answer.job) return false;
+        return this.usable(answer, email) && answer.confidence >= SURE;
+      }
+
+    // True when the answer passes everything but the 70: left on the card for you to say yes or no (Josh, 2026-10-30).
+    suggests(answer, email)
+      {
+        return this.usable(answer, email) && answer.confidence < SURE;
+      }
+
+    // A real change, a job picked, and that job's company really is the sender. However sure the AI is, failing the
+    // company check means nothing moves and nothing's suggested.
+    usable(answer, email)
+      {
+        if(!answer || answer.status === "no_change" || !answer.job) return false;
         return this.match.mentions(answer.job.company, email);
       }
   }

@@ -1,8 +1,11 @@
 import mongoose from "mongoose";
 
-// What a run can be for: finding who to contact about a job, drafting notes to one of them, and Fill in, which reads a
-// link before its job exists, fills the card and finds the contact.
-export const RUN_KINDS = ["contact", "note", "fill"];
+// What a run can be for: finding who to contact about a job, drafting notes to one of them, Fill in, which reads a
+// link before its job exists, fills the card and finds the contact, and the email check, which reads your inbox.
+export const RUN_KINDS = ["contact", "note", "fill", "email"];
+
+// Kinds of run that belong to no one job.
+export const JOBLESS_KINDS = ["fill", "email"];
 
 // queued: waiting for a free slot. running: the agent's on it. done and failed are the two ways it ends.
 export const RUN_STATUSES = ["queued", "running", "done", "failed"];
@@ -34,8 +37,8 @@ const usageSchema = new mongoose.Schema(
 
 const runSchema = new mongoose.Schema(
   {
-    // A fill run starts before its job exists, and gets its job once you press Add to board.
-    job: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: [function() { return this.kind !== "fill"; }, "A run needs a job."], index: true },
+    // A fill run starts before its job exists, and gets its job once you press Add to board. An email check has none.
+    job: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: [function() { return !JOBLESS_KINDS.includes(this.kind); }, "A run needs a job."], index: true },
     kind: { type: String, enum: { values: RUN_KINDS, message: "{VALUE} isn't a kind of run." }, required: true },
     status: { type: String, enum: RUN_STATUSES, default: "queued", index: true },
     steps: [stepSchema],

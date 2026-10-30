@@ -83,9 +83,11 @@ export class RunStore
         return total?.cost || 0;
       }
 
+    // Runs you started today. Email checks don't count: the timer starts dozens a day, which would use up the runs
+    // meant for your own presses. What they spend still counts, in costSince.
     countSince(date)
       {
-        return this.Run.countDocuments({ createdAt: { $gte: date } });
+        return this.Run.countDocuments({ createdAt: { $gte: date }, kind: { $ne: "email" } });
       }
 
     // The queue lives in memory, so a restart loses whatever was waiting or running. Calling those failed means no
