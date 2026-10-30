@@ -51,3 +51,13 @@ test("the AI can't move a card back or sideways", () =>
     assert.equal(lanes.afterAi("applied", "no_change"), null);
     assert.equal(lanes.afterAi("applied", "made_up"), null);
   });
+
+test("forward only says yes to a step ahead from a waiting lane", () =>
+  {
+    assert.equal(lanes.forward("applied", "interviewing"), "interviewing");
+    assert.equal(lanes.forward("ghosted", "offer"), "offer");
+    assert.equal(lanes.forward("offer", "rejected"), null);
+    assert.equal(lanes.forward("interviewing", "applied"), null);
+    assert.equal(lanes.forward("applied", "hired"), null);
+    assert.equal(lanes.forward("applied", "constructor"), null);
+  });

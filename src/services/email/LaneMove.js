@@ -39,8 +39,13 @@ export class LaneMove
     // leave it. Only further along, never back.
     afterAi(lane, status)
       {
-        const next = AI_LANES[status];
-        if(!next || !this.waiting(lane)) return null;
+        return this.forward(lane, AI_LANES[status]);
+      }
+
+    // next, if a waiting card in lane can go there without stepping back. null otherwise.
+    forward(lane, next)
+      {
+        if(!Object.hasOwn(STEP, next) || !this.waiting(lane)) return null;
         return STEP[next] > STEP[lane] ? next : null;
       }
   }

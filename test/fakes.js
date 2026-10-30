@@ -158,3 +158,50 @@ export class FakeFetch
 
 // A JSON answer the way Exa sends one.
 export const jsonResponse = (status, body) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+// The Job model's update calls, over plain objects in memory. It understands only the filters and operators the lane
+// history and the reply desk use: _id, status and moves.$size, then $set, $push and $pop.
+export class MemoryJobs
+  {
+    constructor(jobs = [])
+      {
+        this.jobs = new Map(jobs.map((job) => [job._id, { moves: [], replySuggestion: null, ...structuredClone(job) }]));
+      }
+
+    async findById(id)
+      {
+        const job = this.jobs.get(id);
+        return job ? structuredClone(job) : null;
+      }
+
+    async findOneAndUpdate(filter, update)
+      {
+        const job = this.jobs.get(filter._id);
+        if(!job || !this.fits(job, filter)) return null;
+        Object.assign(job, update.$set || {});
+        for(const [key, value] of Object.entries(update.$push || {})) job[key].push(value);
+        for(const key of Object.keys(update.$pop || {})) job[key].pop();
+        return structuredClone(job);
+      }
+
+    async findByIdAndUpdate(id, fields)
+      {
+        const job = this.jobs.get(id);
+        if(!job) return null;
+        Object.assign(job, fields);
+        return structuredClone(job);
+      }
+
+    fits(job, filter)
+      {
+        if("status" in filter && job.status !== filter.status) return false;
+        if(filter.moves && job.moves.length !== filter.moves.$size) return false;
+        return true;
+      }
+
+    // Moves a card behind the code's back, like a drag landing in between a read and a write.
+    sneak(id, status)
+      {
+        this.jobs.get(id).status = status;
+      }
+  }
