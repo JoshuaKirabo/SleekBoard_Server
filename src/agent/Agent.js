@@ -62,11 +62,14 @@ export class Agent
         if(message.content && message.tool_calls?.length) await this.log.addStep("message", message.content.slice(0, STEP_TEXT));
       }
 
-    // Runs the tools one at a time, in the order the model asked, so the log reads in order.
+    // Runs the tools one at a time, in the order the model asked, so the log reads in order. The deadline is checked
+    // before each one, out here rather than in callTool, which would hand the error to the model as an answer. A run
+    // whose time is up mid-reply stops at its next tool, instead of running the rest while another run has its slot.
     async useTools(conversation, toolCalls)
       {
         for(const call of toolCalls)
           {
+            this.signal?.throwIfAborted();
             await this.log.addStep("tool", this.describe(call));
             conversation.addToolResult(call.id, await this.callTool(call));
           }

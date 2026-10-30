@@ -170,3 +170,31 @@ test("a run under its budget finishes and is charged what the log bills", async 
     assert.equal(await agent.run({ system: "s", task: "t" }), "Done.");
     assert.equal(budget.spent, log.usage.reduce((total, entry) => total + entry.cost, 0));
   });
+
+// Problem #15: once a run's deadline flipped, the rest of that reply's tool calls still ran, so two runs' tools were in
+// flight on one slot. claude-code-from-scratch checks the abort before each tool. These tools ignore their signal, as
+// the audit's did, so only the loop's own check can stop them.
+test("a run whose deadline flips mid-reply doesn't run the rest of its tools", async () =>
+  {
+    const deadline = new AbortController();
+    const ran = [];
+    const stubborn =
+      {
+        name: "stubborn",
+        description: "Ignores its signal.",
+        parameters: { type: "object" },
+        run: async () =>
+          {
+            ran.push("ran");
+            deadline.abort(new Error("This run ran out of time."));
+          },
+      };
+    const calls = Array.from({ length: 4 }, (_, i) => toolCall(`c${i}`, "stubborn", {}));
+    const ai = new ScriptedAi([{ role: "assistant", content: null, tool_calls: calls }]);
+    const log = new MemoryLog();
+    const agent = new Agent({ ai, toolbox: new Toolbox([stubborn]), log, signal: deadline.signal });
+
+    await assert.rejects(agent.run({ system: "s", task: "t" }), /This run ran out of time/);
+    assert.equal(ran.length, 1);
+    assert.equal(log.steps.filter((step) => step.type === "tool").length, 1);
+  });
