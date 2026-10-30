@@ -14,6 +14,7 @@ import { AiLimits } from "./AiLimits.js";
 import { ExaClient } from "./ExaClient.js";
 import { ContactTask } from "./tasks/ContactTask.js";
 import { FillTask } from "./tasks/FillTask.js";
+import { PostingCheck } from "./PostingCheck.js";
 import { NoteTask } from "./tasks/NoteTask.js";
 import { Job } from "../models/job.model.js";
 import { fetchPage, readJob } from "../services/jobReader.js";
@@ -63,12 +64,15 @@ const exa = new ExaClient({ apiKey: process.env.EXA_API_KEY });
 // (Josh, 2026-10-30). Until then there are none, so the finder skips alumni and looks for teammates instead.
 const schools = [];
 
+// Fill in's first look at a link: is it a job at all? On the bottom rung, the cheapest model we have.
+const postingCheck = new PostingCheck({ clientFor: () => clientFor(ladder.pick(1, "json")), fetchPage });
+
 // Every kind of run the server knows, by the kind a run is saved with.
 const tasks = new Map(
   [
     ["contact", new ContactTask({ jobs: Job, exa, fetchPage, schools })],
     ["note", new NoteTask({ jobs: Job, contacts: contactBook, fetchPage })],
-    ["fill", new FillTask({ readJob, exa, fetchPage, store: runStore, schools })],
+    ["fill", new FillTask({ readJob, check: postingCheck, exa, fetchPage, store: runStore, schools })],
   ]);
 
 // A task can still set its own budget.

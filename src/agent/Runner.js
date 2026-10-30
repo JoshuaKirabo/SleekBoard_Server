@@ -20,7 +20,7 @@ export const RUN_USD = 0.1;
 // Everything it uses gets handed in: tasks says what each kind of run does, buildAgent makes an agent for a task, and
 // logFor makes one run's log. Tests swap all three for fakes.
 //
-// A task's start(run) gives back that run's work: brief() for the agent, tools() it may use, built fresh for the run,
+// A task's start(run, { log, signal, budget }) gives back that run's work: brief() for the agent, tools() it may use, built fresh for the run,
 // and result(answer), which turns the agent's final answer into what the run saves. A task that needs more than the
 // job, like the contact a note is for, also has inputFor(input, jobId), which checks what was sent and gives back
 // what the run should keep, before the run is saved or counted.
@@ -126,8 +126,9 @@ export class Runner
     // Starts the task's work for this run, gives an agent its tools, and turns the agent's answer into the result.
     async work({ task, run, log, signal })
       {
-        const work = await task.start(run);
-        const agent = this.buildAgent({ task, tools: work.tools(), log, signal, budget: new RunBudget(run.budget) });
+        const budget = new RunBudget(run.budget);
+        const work = await task.start(run, { log, signal, budget });
+        const agent = this.buildAgent({ task, tools: work.tools(), log, signal, budget });
         return work.result(await agent.run(work.brief()));
       }
 
