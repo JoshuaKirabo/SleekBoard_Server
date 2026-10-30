@@ -45,10 +45,12 @@ export class FillRun
         return ["Fill in this job from its posting, then find who to contact about it.", `Posting: ${this.link}`, data, schoolsLine(this.schools)].join("\n");
       }
 
+    // about is the posting's own text, for a site whose page is empty without JavaScript and whose data names no
+    // employer (UKG). The company's name is in there, and it counts as read, so fill_job can check it.
     factsText()
       {
-        const { company, role, location, deadline } = this.facts;
-        return [company && `Company: ${company}.`, role && `Job title: ${role}.`, location && `Location: ${location}.`, deadline && `Closes: ${deadline}.`].filter(Boolean).join(" ");
+        const { company, role, location, deadline, about } = this.facts;
+        return [company && `Company: ${company}.`, role && `Job title: ${role}.`, location && `Location: ${location}.`, deadline && `Closes: ${deadline}.`, about && `The posting says: ${about}`].filter(Boolean).join(" ");
       }
 
     // The employer's website, for the card's logo, when the link reader found one.

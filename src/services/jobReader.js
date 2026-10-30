@@ -4,11 +4,12 @@ import https from "node:https";
 import { BlockList, isIP } from "node:net";
 import zlib from "node:zlib";
 import { PlaceName } from "./PlaceName.js";
+import { PageText } from "../agent/tools/PageText.js";
 
 // Reads a job posting from its link. Most job sites embed a schema.org JobPosting block so Google can list the role,
 // and that block is the best source we have: title, employer, location and closing date, all labelled. When a page
 // has none we fall back to its share-preview tags and <title>. Greenhouse's new boards ship neither, so they go
-// through Greenhouse's public API instead.
+// through Greenhouse's public API instead, and UKG's through the job data its page hands its own script.
 
 const TIMEOUT = 8000;
 const MAX_BYTES = 3 * 1024 * 1024;
@@ -24,7 +25,7 @@ const HEADERS =
 
 // Job boards where the employer is a tenant. The value says where the tenant's name lives: "sub" for the first label
 // of the hostname, a number for that path segment. The name is our best lead on the employer's own domain.
-const BOARDS = { "myworkdayjobs.com": "sub", "greenhouse.io": 0, "lever.co": 0, "ashbyhq.com": 0, "workable.com": 0, "smartrecruiters.com": 0, "bamboohr.com": "sub", "recruitee.com": "sub", "breezy.hr": "sub" };
+const BOARDS = { "myworkdayjobs.com": "sub", "greenhouse.io": 0, "lever.co": 0, "ashbyhq.com": 0, "workable.com": 0, "smartrecruiters.com": 0, "bamboohr.com": "sub", "recruitee.com": "sub", "breezy.hr": "sub", "ukg.net": "sub" };
 
 // Sites that list other people's jobs. Their domain is never the employer's.
 const AGGREGATORS = ["linkedin.com", "indeed.com", "glassdoor.com", "wellfound.com", "ycombinator.com", "simplify.jobs", "ziprecruiter.com", "monster.com"];
@@ -373,6 +374,87 @@ const readGreenhouse = async (url) =>
     return { company: job.company_name || "", role: decode(job.title), location: first ? `${first}${offices.length > 1 ? ` +${offices.length - 1}` : ""}` : "", deadline: "", website: "", source: "greenhouse" };
   };
 
+// ---------- UKG ----------
+
+// UKG Pro Recruiting builds its posting in the browser, so the page's text is empty template code and Exa only gets an
+// "unsupported browser" page. The job is still in the HTML: the page hands its script one JSON object, in
+// CandidateOpportunityDetail({...}). Found on a Pinnacle Fertility posting (problem #35, 2026-10-30).
+const UKG_MARK = "CandidateOpportunityDetail(";
+
+// Longest posting text kept. It goes into the run's brief on every step, so it's held to about a page.
+const MAX_ABOUT = 6_000;
+
+const pageText = new PageText();
+
+// Where the JSON object that opens at start closes, or -1. One pass, start to end, skipping braces inside strings so a
+// description with { or } in it can't throw the count off. No regex, since the page is whoever owns the site's.
+const objectEnd = (text, start) =>
+  {
+    let depth = 0;
+    let inString = false;
+    for(let index = start; index < text.length; index++)
+      {
+        const char = text[index];
+        if(inString)
+          {
+            if(char === "\\") index++;
+            else if(char === "\"") inString = false;
+          }
+        else if(char === "\"") inString = true;
+        else if(char === "{") depth++;
+        else if(char === "}" && --depth === 0) return index + 1;
+      }
+    return -1;
+  };
+
+// The job object UKG's page hands its script, or null when the page has none.
+const ukgOpportunity = (html) =>
+  {
+    const at = html.indexOf(UKG_MARK);
+    if(at === -1) return null;
+    const start = at + UKG_MARK.length;
+    const end = html[start] === "{" ? objectEnd(html, start) : -1;
+    if(end === -1) return null;
+    try
+      {
+        return JSON.parse(html.slice(start, end));
+      }
+    catch
+      {
+        return null;
+      }
+  };
+
+// One UKG office as "City, ST".
+const ukgPlace = (location) =>
+  {
+    const address = location?.Address || {};
+    return placeNames.fromAddress({ locality: String(address.City || ""), region: String(address.State?.Code || address.State?.Name || ""), country: String(address.Country?.Name || "") });
+  };
+
+// The first web link in the posting's text. UKG has no field for the employer's site, but the posting usually links
+// it ("Learn more at www.pinnaclefertility.com"). findDomain still drops it if it's a job board.
+const firstLink = (html) =>
+  {
+    const at = html.indexOf("href=\"http");
+    if(at === -1) return "";
+    const start = at + "href=\"".length;
+    const end = html.indexOf("\"", start);
+    return end === -1 ? "" : decode(html.slice(start, end));
+  };
+
+// UKG names no employer, so company stays empty and about carries the posting's own words, which do. The Fill in run
+// reads the name from there.
+export const readUkg = (html) =>
+  {
+    const job = ukgOpportunity(html);
+    if(!job?.Title) return null;
+    const description = String(job.Description || "");
+    const places = [].concat(job.Locations || []).map(ukgPlace).filter(Boolean);
+    const location = places.length ? `${places[0]}${places.length > 1 ? ` +${places.length - 1}` : ""}` : "";
+    return { company: "", role: decode(String(job.Title)), location, deadline: "", website: firstLink(description), about: pageText.from(description).slice(0, MAX_ABOUT), source: "ukg" };
+  };
+
 // ---------- Fallback: preview tags and the tab title ----------
 
 // Titles come as "Role at Company", "Role @ Company", or "Company - Role" with either side first. Whichever side
@@ -438,11 +520,11 @@ export const readJob = async (link) =>
         const page = await fetchPage(url);
         url = page.url;
         const posting = jobPostings(page.html)[0];
-        found = posting ? readPosting(posting) : readMeta(page.html, url);
+        found = posting ? readPosting(posting) : readUkg(page.html) || readMeta(page.html, url);
       }
     if(!found) throw new ReadError("The page opened but had nothing we could read.", 422);
 
     const company = cleanCompany(found.company);
     const domain = await findDomain({ url, website: found.website, company });
-    return { company, role: found.role, location: found.location, deadline: found.deadline, domain, source: found.source };
+    return { company, role: found.role, location: found.location, deadline: found.deadline, domain, about: found.about || "", source: found.source };
   };

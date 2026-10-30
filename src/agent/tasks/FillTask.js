@@ -53,9 +53,10 @@ export class FillTask
           }
       }
 
-    // The link reader goes first and costs nothing. Only a posting's own job data counts as facts (JobPosting data, or
-    // Greenhouse's API). A page title doesn't: LinkedIn's stand-in search page gave "Deputy Commissioner Jobs" for an
-    // Amazon posting. A posting it can't read just means no facts, and the run reads the page itself.
+    // The link reader goes first and costs nothing. Only a posting's own job data counts as facts (JobPosting data,
+    // Greenhouse's API, or the job UKG's page hands its script). A page title doesn't: LinkedIn's stand-in search page
+    // gave "Deputy Commissioner Jobs" for an Amazon posting. A posting it can't read just means no facts, and the run
+    // reads the page itself.
     //
     // A link with no job data gets the cheap check first, and one that isn't a job ends the run there, before the
     // contact model reads anything. The run's error starts "Not a job", which the add sheet shows as it is.
@@ -64,7 +65,7 @@ export class FillTask
         const link = run.input?.link;
         if(!link) throw new Error("This run has no link to read.");
         const read = await this.readJob(link).catch(() => null);
-        const facts = ["jobposting", "greenhouse"].includes(read?.source) ? read : null;
+        const facts = ["jobposting", "greenhouse", "ukg"].includes(read?.source) ? read : null;
         if(!facts) await this.ensureJob(link, context);
         const onFilled = (job) => this.store.showResult(run.id, { job, contacts: [], note: "" });
         return new FillRun({ link, facts, exa: this.exa, fetchPage: this.fetchPage, onFilled, schools: this.schools });
