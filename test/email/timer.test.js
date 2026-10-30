@@ -10,12 +10,13 @@ const connected = { connected: async () => true, access: async () => "tok" };
 const offline = { connected: async () => false, access: async () => "" };
 
 // A runner and store that remember what was submitted, with runs that stay in whatever status the test sets.
-const timerWith = (tokens, status = "running") =>
+const timerWith = (tokens, status = "running", news = true) =>
   {
     const submitted = [];
     const runner = { submit: async (kind) => (submitted.push(kind), { id: `run-${submitted.length}` }) };
     const store = { find: async (id) => ({ id, status }) };
-    return { submitted, timer: new MailTimer({ runner, store, tokens, everyMs: 60_000 }) };
+    const check = { hasNew: async () => news };
+    return { submitted, timer: new MailTimer({ runner, store, tokens, check, everyMs: 60_000 }) };
   };
 
 test("nothing starts while Gmail isn't connected", async () =>
@@ -25,7 +26,14 @@ test("nothing starts while Gmail isn't connected", async () =>
     assert.deepEqual(submitted, []);
   });
 
-test("a connected inbox gets an email run", async () =>
+test("a quiet minute starts no run", async () =>
+  {
+    const { timer, submitted } = timerWith(connected, "done", false);
+    assert.equal(await timer.tick(), null);
+    assert.deepEqual(submitted, []);
+  });
+
+test("a connected inbox with a reply due gets an email run", async () =>
   {
     const { timer, submitted } = timerWith(connected, "done");
     assert.equal((await timer.tick()).id, "run-1");
@@ -51,7 +59,7 @@ test("once the last check has finished, the next one starts", async () =>
 test("a check that can't start, like a full day's budget, is logged and doesn't throw", async () =>
   {
     const runner = { submit: async () => { throw new Error("Today's $1 AI budget is used up."); } };
-    const timer = new MailTimer({ runner, store: { find: async () => null }, tokens: connected, everyMs: 60_000 });
+    const timer = new MailTimer({ runner, store: { find: async () => null }, tokens: connected, check: { hasNew: async () => true }, everyMs: 60_000 });
     const warn = console.warn;
     const warned = [];
     console.warn = (...args) => warned.push(args.join(" "));

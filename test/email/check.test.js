@@ -37,7 +37,8 @@ const answer = (fields) => ({ role: "assistant", content: JSON.stringify({ match
 const setup = ({ inbox, processed = [], caughtUp = false, ai = [], fail = [], cards = CARDS } = {}) =>
   {
     const Job = new MemoryJobs(cards);
-    const box = { processed: [...processed], caughtUp, checks: [] };
+    const clock = { now: 1_000_000_000 };
+    const box = { processed: [...processed], resting: [], caughtUp, checks: [] };
     const queries = [];
     const gmail =
       {
@@ -51,7 +52,12 @@ const setup = ({ inbox, processed = [], caughtUp = false, ai = [], fail = [], ca
     const mailbox =
       {
         get: async () => structuredClone(box),
-        remember: async (id) => box.processed.push(id),
+        remember: async (id) =>
+          {
+            box.processed.push(id);
+            box.resting = box.resting.filter((one) => one.id !== id);
+          },
+        leave: async (id) => box.resting = [...box.resting.filter((one) => one.id !== id), { id, at: new Date(clock.now) }],
         checked: async (clean) => (box.checks.push(clean), clean && (box.caughtUp = true)),
       };
     const lanes = new LaneMove();
@@ -71,9 +77,10 @@ const setup = ({ inbox, processed = [], caughtUp = false, ai = [], fail = [], ca
         lanes,
         desk: new ReplyDesk({ Job, history: new LaneHistory({ Job }), lanes }),
         sleep: async (ms) => gaps.push(ms),
+        now: () => clock.now,
       });
     const log = new MemoryLog();
-    return { check, Job, box, queries, model, gaps, log, go: () => check.run({ token: "tok", log }) };
+    return { check, Job, box, clock, queries, model, gaps, log, go: () => check.run({ token: "tok", log }) };
   };
 
 test("sure replies move their cards, as email moves, with the reply kept", async () =>
@@ -108,12 +115,26 @@ test("an auto-reply is handled and moves nothing", async () =>
     assert.deepEqual(box.processed, ["m1"]);
   });
 
-test("a sure reply with no card is tried again next check, instead of lost", async () =>
+test("a sure reply with no card rests, then lands once the card exists", async () =>
   {
-    const { box, go } = setup({ inbox: { m1: mail.nobodyNo } });
+    const { Job, box, clock, go } = setup({ inbox: { m1: mail.nobodyNo } });
     assert.equal((await go()).left, 1);
     assert.deepEqual(box.processed, []);
-    assert.deepEqual(box.checks, [false]);
+    assert.deepEqual(box.resting.map((one) => one.id), ["m1"]);
+    Job.jobs.set("acme", { _id: "acme", company: "Acme", role: "PM", status: "applied", moves: [], replySuggestion: null });
+    assert.equal((await go()).resting, 1);
+    clock.now += 10 * 60_000 + 1;
+    assert.equal((await go()).moved, 1);
+    assert.equal((await Job.findById("acme")).status, "rejected");
+    assert.deepEqual(box.resting, []);
+    assert.deepEqual(box.processed, ["m1"]);
+  });
+
+test("a reply with no card doesn't hold up the first look", async () =>
+  {
+    const { box, go } = setup({ inbox: { m1: mail.nobodyNo } });
+    await go();
+    assert.deepEqual(box.checks, [true]);
   });
 
 test("a Saved card isn't waiting on a reply, so it's left alone", async () =>
@@ -139,12 +160,15 @@ test("the first check reads 90 days, and once it's caught up the next reads 3", 
     assert.match(queries[1], /newer_than:3d/);
   });
 
-test("a check with something left over stays on the 90-day look", async () =>
+test("a check that runs out of AI reads stays on the 90-day look", async () =>
   {
-    const { check, queries, log } = setup({ inbox: { m1: mail.nobodyNo } });
+    const inbox = Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`m${i}`, { ...mail.stripeVague, subject: `Following up ${i}` }]));
+    const { check, queries, log } = setup({ inbox, ai: Array.from({ length: 6 }, () => answer({})) });
+    await check.run({ token: "tok", log });
     await check.run({ token: "tok", log });
     await check.run({ token: "tok", log });
     assert.match(queries[1], /newer_than:90d/);
+    assert.match(queries[2], /newer_than:3d/);
   });
 
 test("an unclear reply the AI is sure about moves the card", async () =>
@@ -181,11 +205,12 @@ test("a suggestion that wouldn't be a step forward is dropped", async () =>
     assert.equal((await Job.findById("stripe")).replySuggestion, null);
   });
 
-test("a failed AI read is tried again next check, instead of lost", async () =>
+test("a failed AI read rests and is tried again, instead of lost", async () =>
   {
     const { box, go } = setup({ inbox: { m1: mail.stripeVague }, ai: [{ role: "assistant", content: "Looks like an interview!" }] });
     assert.equal((await go()).left, 1);
     assert.deepEqual(box.processed, []);
+    assert.deepEqual(box.resting.map((one) => one.id), ["m1"]);
   });
 
 test("the AI reads 5 replies a check at most, 2 seconds apart, and the rest wait", async () =>
@@ -196,15 +221,18 @@ test("the AI reads 5 replies a check at most, 2 seconds apart, and the rest wait
     assert.equal(model.calls.length, 5);
     assert.deepEqual(gaps, [2000, 2000, 2000, 2000]);
     assert.equal(result.ignored, 5);
-    assert.equal(result.left, 1);
+    assert.equal(result.deferred, 1);
     assert.equal(box.processed.length, 5);
+    assert.deepEqual(box.resting, []);
+    assert.deepEqual(box.checks, [false]);
   });
 
-test("a message Gmail won't open is tried again next check", async () =>
+test("a message Gmail won't open waits for the next check, without resting", async () =>
   {
     const { box, go } = setup({ inbox: { m1: mail.stripeNo, m2: mail.kplerYes }, fail: ["m1"] });
     const result = await go();
-    assert.equal(result.left, 1);
+    assert.equal(result.deferred, 1);
+    assert.deepEqual(box.resting, []);
     assert.equal(result.moved, 1);
     assert.deepEqual(box.processed, ["m2"]);
   });
@@ -231,4 +259,14 @@ test("a stopped run stops the check, and what it handled stays handled", async (
       };
     await assert.rejects(check.run({ token: "tok", signal: stop.signal }), /took too long/);
     assert.deepEqual(box.processed, ["m1"]);
+  });
+
+test("hasNew is true only while a reply is due", async () =>
+  {
+    const { check, clock, go } = setup({ inbox: { m1: mail.thanks, m2: mail.nobodyNo } });
+    assert.equal(await check.hasNew("tok"), true);
+    await go();
+    assert.equal(await check.hasNew("tok"), false);
+    clock.now += 10 * 60_000 + 1;
+    assert.equal(await check.hasNew("tok"), true);
   });

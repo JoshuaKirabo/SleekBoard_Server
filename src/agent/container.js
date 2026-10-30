@@ -113,8 +113,9 @@ export const runner = new Runner({ store: runStore, cap, tasks, buildAgent, logF
 // Where you say yes or no to a run's suggestions. Built here because it reads runs.
 export const suggestionDesk = new SuggestionDesk({ runs: runStore, jobs: Job, book: contactBook, card: jobCard });
 
-// How often the inbox is checked. JobNavigator's default.
-const MAIL_EVERY_MS = 30 * 60_000;
+// How often the inbox is checked. JobNavigator's is 30 minutes. Ours is a minute, so a card moves soon after the reply
+// lands, and a minute with nothing new is one Gmail call and no run.
+const MAIL_EVERY_MS = 60_000;
 
 // Started by server.js once Mongo's up.
-export const mailTimer = new MailTimer({ runner, store: runStore, tokens: gmailTokens, everyMs: MAIL_EVERY_MS });
+export const mailTimer = new MailTimer({ runner, store: runStore, tokens: gmailTokens, check: replyCheck, everyMs: MAIL_EVERY_MS });

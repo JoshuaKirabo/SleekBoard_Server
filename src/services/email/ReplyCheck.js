@@ -3,13 +3,17 @@
 // sure act on their own, the rest go to the AI, 5 at most per check with a 2 second gap.
 //
 // Fixes to theirs, each a way they lost a reply for good:
-//   - A failed AI read is tried again next check. Theirs marked it handled.
-//   - A sure reply with no card to match is tried again next check, so a reply that lands before you add the job
-//     still counts once you do. Theirs marked it handled.
+//   - A failed AI read is tried again later. Theirs marked it handled.
+//   - A sure reply with no card to match is tried again later, so a reply that lands before you add the job still
+//     counts once you do. Theirs marked it handled.
 //   - The first check reads back 90 days (AutoJob's first look), later ones 3. Theirs only ever read 3, so a server
 //     that was off for longer missed replies.
-//   - A card that moved between reading and writing is left for next check, not dropped.
+//   - A card that moved between reading and writing, a message Gmail won't open, or the AI reads running out all
+//     wait for the next check instead of being dropped.
 // Anything tried again ages out on its own once it's older than the 3 days a check reads.
+//
+// Ours checks every minute, theirs every 30 (Josh wants a card to move as soon as the reply lands). So "tried again
+// later" means the reply rests for 10 minutes first, or a reply with no card would start a check every minute.
 //
 // JobNavigator is MIT licensed: Copyright (c) 2026 JobNavigator Contributors.
 // https://github.com/vesaias/JobNavigator/blob/main/backend/email_monitor/gmail_client.py
@@ -23,14 +27,18 @@ const MOST = 500;
 const AI_PER_CHECK = 5;
 const AI_GAP_MS = 2_000;
 
-// What can happen to one reply. "left" means it wasn't handled and the next check tries it again.
-export const OUTCOMES = ["moved", "noted", "suggested", "ignored", "left"];
+// How long a reply that couldn't be handled rests before the next try.
+export const REST_MS = 10 * 60_000;
+
+// What can happen to one reply. "left" wasn't handled and rests before another try. "deferred" is tried at the next
+// check.
+export const OUTCOMES = ["moved", "noted", "suggested", "ignored", "left", "deferred"];
 
 const LANE_NAMES = { saved: "Saved", applied: "Applied", interviewing: "Interviewing", offer: "Offer", rejected: "Rejected", ghosted: "Ghosted" };
 
 export class ReplyCheck
   {
-    constructor({ gmail, search, reader, mailbox, jobs, sorter, match, ai, lanes, desk, aiPerCheck = AI_PER_CHECK, aiGapMs = AI_GAP_MS, sleep })
+    constructor({ gmail, search, reader, mailbox, jobs, sorter, match, ai, lanes, desk, aiPerCheck = AI_PER_CHECK, aiGapMs = AI_GAP_MS, sleep, now = () => Date.now() })
       {
         this.gmail = gmail;
         this.search = search;
@@ -45,28 +53,62 @@ export class ReplyCheck
         this.aiPerCheck = aiPerCheck;
         this.aiGapMs = aiGapMs;
         this.sleep = sleep || ((ms, signal) => new Promise((resolve) => setTimeout(resolve, ms, signal)));
+        this.now = now;
       }
 
     // Runs one check with an access token. Gives back a count of each outcome. The run's { log, budget, signal } bill
     // the AI and stop the check when the run's time is up; every reply handled so far stays handled.
     async run({ token, log, budget, signal })
       {
-        const box = await this.mailbox.get();
-        const days = box.caughtUp ? DAYS : FIRST_LOOK_DAYS;
-        const ids = await this.gmail.ids(token, this.search.query(days), { most: MOST, signal });
-        const seen = new Set(box.processed);
+        const { days, found, due, resting } = await this.inbox(token, signal);
         const state = { token, log, budget, signal, aiLeft: this.aiPerCheck, aiUsed: 0, waiting: await this.waitingJobs() };
         const tally = Object.fromEntries(OUTCOMES.map((outcome) => [outcome, 0]));
-        for(const id of ids.filter((id) => !seen.has(id)))
+        for(const id of due)
           {
             signal?.throwIfAborted();
             const outcome = await this.handleId(id, state);
             tally[outcome]++;
-            if(outcome !== "left") await this.mailbox.remember(id);
+            await this.keep(id, outcome);
           }
-        await this.mailbox.checked(tally.left === 0);
-        await log?.addStep("message", this.summaryOf(days, ids.length, tally));
-        return { days, found: ids.length, ...tally };
+        // Replies with no card don't hold up the first look: a 60 day old rejection from a company you never added
+        // doesn't matter. Only replies it ran out of time or AI reads for do.
+        await this.mailbox.checked(tally.deferred === 0);
+        await log?.addStep("message", this.summaryOf(days, found, tally));
+        return { days, found, resting, ...tally };
+      }
+
+    // True when the inbox has a reply due right now. The timer asks before starting a run, so a minute with nothing new
+    // costs one Gmail call and leaves no run behind.
+    async hasNew(token, signal)
+      {
+        return (await this.inbox(token, signal)).due.length > 0;
+      }
+
+    // What the search finds, and which of those are due: not handled yet and not resting.
+    async inbox(token, signal)
+      {
+        const box = await this.mailbox.get();
+        const days = box.caughtUp ? DAYS : FIRST_LOOK_DAYS;
+        const ids = await this.gmail.ids(token, this.search.query(days), { most: MOST, signal });
+        const handled = new Set(box.processed);
+        const resting = this.restingIds(box);
+        const due = ids.filter((id) => !handled.has(id) && !resting.has(id));
+        return { days, found: ids.length, due, resting: ids.filter((id) => resting.has(id)).length };
+      }
+
+    // Replies tried within the last 10 minutes.
+    restingIds(box)
+      {
+        const since = this.now() - REST_MS;
+        return new Set((box.resting || []).filter((one) => new Date(one.at).getTime() > since).map((one) => one.id));
+      }
+
+    // Writes down what happened to a reply: handled, resting, or nothing at all for one the next check picks up.
+    keep(id, outcome)
+      {
+        if(outcome === "left") return this.mailbox.leave(id);
+        if(outcome === "deferred") return null;
+        return this.mailbox.remember(id);
       }
 
     // The cards a reply can still move, read once a check and kept up to date as cards move.
@@ -75,7 +117,7 @@ export class ReplyCheck
         return this.jobs.find({ status: { $in: this.lanes.waitingLanes() } });
       }
 
-    // Opens one message and handles it. One Gmail can't open is tried again next check, like theirs.
+    // Opens one message and handles it. One Gmail can't open waits for the next check, like theirs.
     async handleId(id, state)
       {
         let message;
@@ -86,7 +128,7 @@ export class ReplyCheck
         catch(error)
           {
             if(state.signal?.aborted) throw error;
-            return "left";
+            return "deferred";
           }
         return this.handle(this.reader.read(message), state);
       }
@@ -110,7 +152,7 @@ export class ReplyCheck
     // Unclear, so the AI reads it, while this check still has AI reads left.
     async byAi(email, state)
       {
-        if(state.aiLeft <= 0) return "left";
+        if(state.aiLeft <= 0) return "deferred";
         const answer = await this.askAi(email, state);
         if(!answer) return "left";
         if(this.ai.acts(answer, email)) return this.apply(answer.job, this.lanes.afterAi(answer.job.status, answer.status), email, state);
@@ -135,8 +177,8 @@ export class ReplyCheck
           }
       }
 
-    // Moves the card when there's a lane to move to, or just keeps the reply on it. A card that moved meanwhile is
-    // tried again next check.
+    // Moves the card when there's a lane to move to, or just keeps the reply on it. A card that moved meanwhile waits
+    // for the next check.
     async apply(job, lane, email, state)
       {
         if(!lane)
@@ -145,7 +187,7 @@ export class ReplyCheck
             return "noted";
           }
         const moved = await this.desk.move(job, lane, email);
-        if(!moved) return "left";
+        if(!moved) return "deferred";
         this.refresh(state, moved);
         await state.log?.addStep("message", `Moved ${job.company} to ${LANE_NAMES[lane]} from a reply.`);
         return "moved";
