@@ -24,6 +24,39 @@ export class ScriptedAi
       }
   }
 
+// An SDK that streams scripted chunks, one script per request, and keeps every request it was sent. A script can
+// also be a function that gets the request's signal and returns its own stream, for a reply that stalls.
+export class StreamingSdk
+  {
+    constructor(scripts)
+      {
+        this.scripts = [...scripts];
+        this.requests = [];
+        this.signals = [];
+        this.chat = { completions: { create: (body, options) => this.create(body, options) } };
+      }
+
+    async create(body, { signal } = {})
+      {
+        this.requests.push(structuredClone(body));
+        this.signals.push(signal);
+        const script = this.scripts.shift();
+        if(!script) throw new Error("The script ran out of replies.");
+        return typeof script === "function" ? script(signal) : this.play(script);
+      }
+
+    async *play(chunks)
+      {
+        for(const chunk of chunks) yield chunk;
+      }
+  }
+
+// One streamed chunk carrying a bit of the reply, the way Together sends it.
+export const chunk = (delta) => ({ choices: [{ index: 0, delta }] });
+
+// The last chunk, with nothing but the usage.
+export const usageChunk = (input, output) => ({ choices: [], usage: { prompt_tokens: input, completion_tokens: output } });
+
 // A tool call the way the API sends it, arguments and all.
 export const toolCall = (id, name, args) => ({ id, type: "function", function: { name, arguments: typeof args === "string" ? args : JSON.stringify(args) } });
 

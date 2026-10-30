@@ -25,8 +25,8 @@ export const ladder = new ModelLadder(MODELS.map((settings) => new Model(setting
 const clientFor = (model) =>
   {
     if(!process.env.TOGETHER_API_KEY) throw new Error("TOGETHER_API_KEY is missing from .env.");
-    // 45 seconds per reply and one retry when Together hiccups. Every model we tried answered a whole test run in 1.5
-    // to 12 seconds, so that's plenty, and the run's own 3 minutes still caps it all.
+    // 45 seconds for a reply to start and one retry when Together hiccups. Once it's streaming, AiClient gives it
+    // another 45 seconds to finish, and the run's own 3 minutes still caps it all.
     const sdk = new OpenAI({ apiKey: process.env.TOGETHER_API_KEY, baseURL: TOGETHER_URL, timeout: 45_000, maxRetries: 1 });
     return new AiClient({ sdk, model });
   };

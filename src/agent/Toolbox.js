@@ -26,9 +26,10 @@ export class Toolbox
         return [...this.tools.values()].map(({ name, description, parameters }) => ({ type: "function", function: { name, description, parameters } }));
       }
 
-    // Models sometimes make up a tool, so an unknown name is an error the agent can read and get past.
+    // Models sometimes make up a tool, or leave the name out, so both are errors the agent can read and get past.
     find(name)
       {
+        if(!name) throw new Error("That tool call had no tool name.");
         const tool = this.tools.get(name);
         if(!tool) throw new Error(`There's no tool called "${name}".`);
         return tool;

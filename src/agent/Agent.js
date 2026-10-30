@@ -74,11 +74,11 @@ export class Agent
       {
         try
           {
-            return await this.toolbox.call(call.function.name, this.readArgs(call), this.signal);
+            return await this.toolbox.call(this.nameOf(call), this.readArgs(call), this.signal);
           }
         catch(error)
           {
-            await this.log.addStep("error", `${call.function.name}: ${error.message}`.slice(0, STEP_TEXT));
+            await this.log.addStep("error", `${this.nameOf(call) || "(no name)"}: ${error.message}`.slice(0, STEP_TEXT));
             return `Error: ${error.message}`;
           }
       }
@@ -88,7 +88,7 @@ export class Agent
       {
         try
           {
-            return JSON.parse(call.function.arguments || "{}");
+            return JSON.parse(call.function?.arguments || "{}");
           }
         catch
           {
@@ -99,6 +99,13 @@ export class Agent
     // How a tool call reads in the log, like web_search {"query":"EP recruiter"}.
     describe(call)
       {
-        return `${call.function.name} ${call.function.arguments || ""}`.slice(0, STEP_TEXT);
+        return `${this.nameOf(call) || "(no name)"} ${call.function?.arguments || ""}`.slice(0, STEP_TEXT);
+      }
+
+    // AiClient always sends calls in full, but a call with a part missing still mustn't end the run. The model hears
+    // what was wrong instead.
+    nameOf(call)
+      {
+        return call.function?.name || "";
       }
   }
