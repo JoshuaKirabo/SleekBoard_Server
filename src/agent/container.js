@@ -32,6 +32,11 @@ import { ReplySorter } from "../services/email/ReplySorter.js";
 import { ReplyMatch } from "../services/email/ReplyMatch.js";
 import { ReplyAi } from "../services/email/ReplyAi.js";
 import { MailTimer } from "../services/email/MailTimer.js";
+import { GmailKeys } from "../services/email/GmailKeys.js";
+import { GoogleAuth } from "../services/email/GoogleAuth.js";
+import { OAuthState } from "../services/email/OAuthState.js";
+import { GmailTokens } from "../services/email/GmailTokens.js";
+import { GmailConnect } from "../services/email/GmailConnect.js";
 
 // The one place that builds the real thing. Every class above gets what it needs through its constructor, and this
 // file is where those pieces meet, like Spring's wiring without Spring. Tests skip this file and build their own.
@@ -79,14 +84,44 @@ const schools = [];
 // Fill in's first look at a link: is it a job at all? On the bottom rung, the cheapest model we have.
 const postingCheck = new PostingCheck({ clientFor: () => clientFor(ladder.pick(1, "json")), fetchPage });
 
+// Connect Gmail. Google sends you back to GMAIL_REDIRECT_URI, which has to match the OAuth client's redirect URI in
+// Google Cloud exactly. It comes from .env, never from the request, since a request can claim any Host.
+export const gmailRedirect = process.env.GMAIL_REDIRECT_URI || `http://localhost:${process.env.PORT || 5050}/api/gmail/callback`;
+
+// Where the callback sends you afterwards: the board, on the first of CLIENT_URL's origins.
+export const boardUrl = `${(process.env.CLIENT_URL || "http://localhost:5173").split(",")[0].trim().replace(/\/$/, "")}/jobs`;
+
+// Without GMAIL_SECRET Gmail just reads as not set up, so the rest of the server still starts. A bad one is worth
+// saying so once.
+const gmailKeysOrNull = () =>
+  {
+    if(!process.env.GMAIL_SECRET) return null;
+    try
+      {
+        return new GmailKeys(process.env.GMAIL_SECRET);
+      }
+    catch(error)
+      {
+        console.warn(error.message);
+        return null;
+      }
+  };
+
+const gmailApi = new GmailApi();
+const mailbox = new MailboxStore({ Mailbox });
+const googleAuth = new GoogleAuth({ clientId: process.env.GMAIL_CLIENT_ID, clientSecret: process.env.GMAIL_CLIENT_SECRET, redirectUri: gmailRedirect });
+const gmailKeys = gmailKeysOrNull();
+export const gmailTokens = new GmailTokens({ mailbox, auth: googleAuth, keys: gmailKeys });
+export const gmailConnect = new GmailConnect({ auth: googleAuth, states: new OAuthState({ keys: gmailKeys }), tokens: gmailTokens, gmail: gmailApi });
+
 // The email check. The AI reads unclear replies on the bottom rung, like the posting check.
 const replyMatch = new ReplyMatch();
 const replyCheck = new ReplyCheck(
   {
-    gmail: new GmailApi(),
+    gmail: gmailApi,
     search: new GmailSearch(),
     reader: new MailMessage(),
-    mailbox: new MailboxStore({ Mailbox }),
+    mailbox,
     jobs: Job,
     sorter: new ReplySorter(),
     match: replyMatch,
@@ -94,9 +129,6 @@ const replyCheck = new ReplyCheck(
     lanes: laneMove,
     desk: replyDesk,
   });
-
-// Connect Gmail is the next piece. Until it's built no inbox is connected, so the timer never starts a check.
-const gmailTokens = { connected: async () => false, access: async () => "" };
 
 // Every kind of run the server knows, by the kind a run is saved with.
 const tasks = new Map(

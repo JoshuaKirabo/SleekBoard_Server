@@ -38,6 +38,27 @@ export class MailboxStore
         return this.Mailbox.updateOne({ key: this.key }, { $push: { resting: { $each: [{ id, at: new Date() }], $slice: -KEEP } } });
       }
 
+    // A new Gmail login, already locked. A new login clears any expired mark, and a different address starts the
+    // first look over.
+    async connect(login, address)
+      {
+        const box = await this.get();
+        const fresh = box.address !== address ? { processed: [], resting: [], caughtUp: false } : {};
+        return this.Mailbox.updateOne({ key: this.key }, { $set: { login, address, connectedAt: new Date(), expired: "", ...fresh } });
+      }
+
+    // Forgets the Gmail login. What's been handled stays, in case you connect the same inbox again.
+    disconnect()
+      {
+        return this.Mailbox.updateOne({ key: this.key }, { $set: { login: "", address: "", connectedAt: null, expired: "" } });
+      }
+
+    // Google refused this login for good.
+    markExpired(fingerprint)
+      {
+        return this.Mailbox.updateOne({ key: this.key }, { $set: { expired: fingerprint } });
+      }
+
     // A check finished. caughtUp is true once one has read everything it found.
     checked(caughtUp)
       {

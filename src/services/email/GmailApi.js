@@ -1,6 +1,6 @@
-// The two Gmail calls the check needs: list the messages a search finds, and open one. Read-only, with an access
-// token Connect Gmail hands over. Same calls as JobNavigator's check_emails (users/me/messages with
-// includeSpamTrash, then each message in full).
+// The Gmail calls SleekBoard makes: list the messages a search finds, open one, and ask which address the inbox is.
+// Read-only, with the access token Connect Gmail hands over. The first two are JobNavigator's check_emails calls
+// (users/me/messages with includeSpamTrash, then each message in full).
 //
 // One fix to theirs: they read only the first 20 results and never the next page, so a busy week pushed real
 // replies out of reach. This follows Gmail's page tokens up to `most` ids.
@@ -52,6 +52,12 @@ export class GmailApi
         const params = new URLSearchParams({ q: query, maxResults: String(size), includeSpamTrash: "true" });
         if(pageToken) params.set("pageToken", pageToken);
         return this.get(token, `/messages?${params}`, signal);
+      }
+
+    // Which address the inbox is.
+    profile(token, signal)
+      {
+        return this.get(token, "/profile", signal);
       }
 
     // One message in full: headers, and the body in all its parts.

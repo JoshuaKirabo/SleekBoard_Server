@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-// One connected inbox and what the email check remembers about it. There's one until SleekBoard has accounts; then
+// One connected inbox, its Gmail login, and what the email check remembers about it. There's one until SleekBoard has accounts; then
 // each person's Gmail gets its own, the way JobNavigator keeps gmail_processed_ids per account.
 // A reply that couldn't be handled yet, and when it was last tried.
 const restingSchema = new mongoose.Schema(
@@ -22,6 +22,14 @@ const mailboxSchema = new mongoose.Schema(
     // False until the first check has read back 90 days without running out of AI reads. After that a check reads 3.
     caughtUp: { type: Boolean, default: false },
     checkedAt: { type: Date, default: null },
+    // The Gmail login, locked with GMAIL_SECRET (GmailKeys). Empty until you connect.
+    login: { type: String, default: "" },
+    // Which Gmail address it is, shown next to the Disconnect button.
+    address: { type: String, default: "" },
+    connectedAt: { type: Date, default: null },
+    // The fingerprint of a login Google has refused for good. While it matches the saved login, nothing calls Google
+    // and the board asks you to reconnect. JobNavigator's gmail_token_status "expired:<fingerprint>".
+    expired: { type: String, default: "" },
   },
   { timestamps: true },
 );

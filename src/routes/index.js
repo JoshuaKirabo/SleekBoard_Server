@@ -4,6 +4,7 @@ import logosRoutes from "./logos.route.js";
 import jobsRoutes from "./jobs.route.js";
 import runsRoutes from "./runs.route.js";
 import connectionsRoutes from "./connections.route.js";
+import gmailRoutes from "./gmail.route.js";
 
 const router = Router();
 
@@ -13,5 +14,6 @@ router.use("/logos", logosRoutes);
 router.use("/jobs", jobsRoutes);
 router.use("/runs", runsRoutes);
 router.use("/connections", connectionsRoutes);
+router.use("/gmail", gmailRoutes);
 
 export default router;
