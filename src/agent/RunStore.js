@@ -7,14 +7,28 @@ export class RunStore
         this.Run = Run;
       }
 
-    create({ kind, job, budget })
+    create({ kind, job, budget, input })
       {
-        return this.Run.create({ kind, job, budget });
+        return this.Run.create({ kind, job, budget, input });
       }
 
     find(id)
       {
         return this.Run.findById(id);
+      }
+
+    // A job's runs, newest first, so the card can pick up the last contact run and each contact's last notes.
+    forJob(jobId, limit = 20)
+      {
+        return this.Run.find({ job: jobId }).sort({ createdAt: -1 }).limit(limit);
+      }
+
+    // Your yes or no on one of a finished run's suggestions. It only lands once per suggestion, so two clicks at the
+    // same moment can't both answer it.
+    decide(id, index, decision)
+      {
+        const path = `result.contacts.${index}.decision`;
+        return this.Run.updateOne({ _id: id, status: "done", [path]: { $exists: false } }, { $set: { [path]: decision } });
       }
 
     // Each write below only lands while the run is still in the state it expects. A run that timed out might still

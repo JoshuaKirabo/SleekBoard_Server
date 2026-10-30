@@ -111,9 +111,9 @@ export class MemoryRunStore
         this.runs = runs;
       }
 
-    async create({ kind, job, budget })
+    async create({ kind, job, budget, input })
       {
-        const run = { id: `run-${this.runs.length + 1}`, kind, job, budget, status: "queued", cost: 0, createdAt: new Date() };
+        const run = { id: `run-${this.runs.length + 1}`, kind, job, budget, input, status: "queued", cost: 0, createdAt: new Date() };
         this.runs.push(run);
         return run;
       }

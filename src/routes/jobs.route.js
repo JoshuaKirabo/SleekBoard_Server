@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { listJobs, createJob, updateJob, deleteJob, extractJob } from "../controllers/jobs.controller.js";
+import { listJobContacts, useWarmLead, removeJobContact } from "../controllers/contacts.controller.js";
 
 const router = Router();
 
@@ -8,5 +9,8 @@ router.post("/", createJob);
 router.post("/extract", extractJob);
 router.patch("/:id", updateJob);
 router.delete("/:id", deleteJob);
+router.get("/:id/contacts", listJobContacts);
+router.post("/:id/contacts", useWarmLead);
+router.delete("/:id/contacts/:contactId", removeJobContact);
 
 export default router;

@@ -21,7 +21,9 @@ export const RUN_USD = 0.1;
 // logFor makes one run's log. Tests swap all three for fakes.
 //
 // A task's start(run) gives back that run's work: brief() for the agent, tools() it may use, built fresh for the run,
-// and result(answer), which turns the agent's final answer into what the run saves.
+// and result(answer), which turns the agent's final answer into what the run saves. A task that needs more than the
+// job, like the contact a note is for, also has inputFor(input, jobId), which checks what was sent and gives back
+// what the run should keep, before the run is saved or counted.
 export class Runner
   {
     constructor({ store, cap, tasks, buildAgent, logFor, slots = 2, runMs = RUN_MS, admitMs = ADMIT_MS, runUsd = RUN_USD })
@@ -41,10 +43,11 @@ export class Runner
       }
 
     // Saves a new run and puts it in line. Gives the run back right away, while it's still queued.
-    async submit(kind, jobId)
+    async submit(kind, jobId, input = {})
       {
         const task = this.taskFor(kind);
-        const run = await this.lock.hold(() => new Deadline(this.admitMs, "Starting a run").race(this.admit(kind, jobId, this.budgetFor(task))));
+        const kept = await this.inputFor(task, input, jobId);
+        const run = await this.lock.hold(() => new Deadline(this.admitMs, "Starting a run").race(this.admit({ kind, job: jobId, budget: this.budgetFor(task), input: kept })));
         this.enqueue({ run, task });
         return run;
       }
@@ -53,10 +56,16 @@ export class Runner
     // until it ends. It always runs under the lock, because two presses that check together both see room before
     // either has saved, and both get in. The deadline stops a stuck database call from jamming the lock for every run
     // after it.
-    async admit(kind, jobId, budget)
+    async admit(run)
       {
-        await this.cap.check(budget);
-        return this.store.create({ kind, job: jobId, budget });
+        await this.cap.check(run.budget);
+        return this.store.create(run);
+      }
+
+    // A task with no inputFor takes nothing but the job.
+    inputFor(task, input, jobId)
+      {
+        return task.inputFor ? task.inputFor(input, jobId) : undefined;
       }
 
     budgetFor(task)

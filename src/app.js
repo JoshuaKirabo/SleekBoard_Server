@@ -26,6 +26,9 @@ const allowedOrigins = (process.env.CLIENT_URL || "")
 app.use(cors({ origin: allowedOrigins.length ? allowedOrigins : true, credentials: true }));
 // Express turns away bodies over 100KB by default, but a job can carry an uploaded logo of up to 200,000 characters
 // (see job.model.js). 256KB fits that logo plus every other field at its cap.
+// LinkedIn's Connections.csv runs about 150 bytes a person, so a big network is a few megabytes. Only that one route
+// gets the bigger limit; the body is read once, so the line after this skips it.
+app.use("/api/connections", express.json({ limit: "8mb" }));
 app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: true }));
 

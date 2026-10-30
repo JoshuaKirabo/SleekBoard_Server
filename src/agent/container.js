@@ -13,8 +13,11 @@ import { Runner } from "./Runner.js";
 import { AiLimits } from "./AiLimits.js";
 import { ExaClient } from "./ExaClient.js";
 import { ContactTask } from "./tasks/ContactTask.js";
+import { NoteTask } from "./tasks/NoteTask.js";
 import { Job } from "../models/job.model.js";
 import { fetchPage } from "../services/jobReader.js";
+import { contactBook, jobCard } from "../services/contacts/index.js";
+import { SuggestionDesk } from "../services/contacts/SuggestionDesk.js";
 
 // The one place that builds the real thing. Every class above gets what it needs through its constructor, and this
 // file is where those pieces meet, like Spring's wiring without Spring. Tests skip this file and build their own.
@@ -63,7 +66,11 @@ const schools = [];
 const tasks = new Map(
   [
     ["contact", new ContactTask({ jobs: Job, exa, fetchPage, schools })],
+    ["note", new NoteTask({ jobs: Job, contacts: contactBook, fetchPage })],
   ]);
 
 // A task can still set its own budget.
 export const runner = new Runner({ store: runStore, cap, tasks, buildAgent, logFor, runUsd: limits.runUsd });
+
+// Where you say yes or no to a run's suggestions. Built here because it reads runs.
+export const suggestionDesk = new SuggestionDesk({ runs: runStore, jobs: Job, book: contactBook, card: jobCard });

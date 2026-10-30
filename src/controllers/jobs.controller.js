@@ -1,6 +1,7 @@
 import { StatusCodes } from "http-status-codes";
 import { Job, JOB_FIELDS } from "../models/job.model.js";
 import { readJob } from "../services/jobReader.js";
+import { contactBook } from "../services/contacts/index.js";
 
 // Express 5 passes a rejected handler straight to the error middleware, so these don't need their own try/catch.
 // Bad ids come back as 404 and failed validation as 400, see errorHandler.
@@ -28,11 +29,12 @@ export const updateJob = async (req, res) =>
     res.json(job);
   };
 
-// DELETE /api/jobs/:id
+// DELETE /api/jobs/:id. The job comes off any contacts saved for it; the people stay, for warm leads later.
 export const deleteJob = async (req, res) =>
   {
     const job = await Job.findByIdAndDelete(req.params.id);
     if(!job) return res.status(StatusCodes.NOT_FOUND).json({ message: "That job doesn't exist." });
+    await contactBook.dropJob(job._id);
     res.status(StatusCodes.NO_CONTENT).end();
   };
 

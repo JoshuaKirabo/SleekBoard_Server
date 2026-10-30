@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 
-// What a run can be for. Piece 3 brings the first one to life.
-export const RUN_KINDS = ["contact"];
+// What a run can be for: finding who to contact about a job, and drafting notes to one of them.
+export const RUN_KINDS = ["contact", "note"];
 
 // queued: waiting for a free slot. running: the agent's on it. done and failed are the two ways it ends.
 export const RUN_STATUSES = ["queued", "running", "done", "failed"];
@@ -42,6 +42,11 @@ const runSchema = new mongoose.Schema(
     cost: { type: Number, default: 0 },
     // The most this run may spend. The cap counts it in full until the run ends.
     budget: { type: Number, default: 0 },
+    // What the run was asked to work on beyond its job. A note run names the contact it writes to.
+    input:
+      {
+        contact: { type: mongoose.Schema.Types.ObjectId, ref: "Contact", default: undefined },
+      },
     result: { type: mongoose.Schema.Types.Mixed, default: null },
     error: { type: String, default: "" },
     startedAt: { type: Date, default: null },
