@@ -7,6 +7,11 @@ const ERROR_TEXT = 200;
 // never counts as free.
 export const SEARCH_USD = 0.007;
 
+// Results per search. Exa's default of 10 came to about 22,000 characters, and every search stays in the
+// conversation, so it's re-sent on every later step. 5 is about half that, and the agent can search again if they
+// miss. Exa's guide says to set this only on purpose, and this is the purpose (problem #24).
+export const RESULTS = 5;
+
 // The only class that talks to Exa, the way AiClient is the only one that talks to Together. fetch is handed in so a
 // test can give it a fake one and nothing goes over the network.
 export class ExaClient
@@ -18,7 +23,7 @@ export class ExaClient
       }
 
     // One search, sent the way Exa's own guide says to: the query plus short highlights from each page, and nothing
-    // else. Gives back Exa's results and what the search cost. The signal goes to fetch, so a tool that runs out of
+    // else but our result count. Gives back Exa's results and what the search cost. The signal goes to fetch, so a tool that runs out of
     // time actually stops.
     async search(query, signal)
       {
@@ -43,7 +48,7 @@ export class ExaClient
 
     body(query)
       {
-        return { query, type: "auto", contents: { highlights: true } };
+        return { query, type: "auto", numResults: RESULTS, contents: { highlights: true } };
       }
 
     // Turning Exa's refusal into a sentence the model and the run log can read. A bad key gets its own message

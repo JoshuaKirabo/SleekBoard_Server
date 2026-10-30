@@ -39,7 +39,7 @@ const searchWith = (answers) =>
     return { fake, tool: new WebSearch({ exa: new ExaClient({ apiKey: "test-key", fetch: fake.fetch }) }) };
   };
 
-test("the search goes to Exa the way its guide says: query and highlights, nothing else", async () =>
+test("the search goes to Exa the way its guide says: query and highlights, plus our 5 results", async () =>
   {
     const { fake, tool } = searchWith([jsonResponse(200, { results: [] })]);
     const signal = new AbortController().signal;
@@ -49,7 +49,7 @@ test("the search goes to Exa the way its guide says: query and highlights, nothi
     assert.equal(request.url, "https://api.exa.ai/search");
     assert.equal(request.method, "POST");
     assert.equal(request.headers["x-api-key"], "test-key");
-    assert.deepEqual(request.body, { query: "Linear engineering manager", type: "auto", contents: { highlights: true } });
+    assert.deepEqual(request.body, { query: "Linear engineering manager", type: "auto", numResults: 5, contents: { highlights: true } });
     assert.equal(request.signal, signal);
   });
 
