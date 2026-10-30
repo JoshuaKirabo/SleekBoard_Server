@@ -88,6 +88,34 @@ test("the daily run limit turns new runs away", async () =>
     await runner.idle();
   });
 
+test("runs pressed at the same moment still stop at the daily limit", async () =>
+  {
+    const { runner } = runnerWith({ buildAgent: slowAgents().buildAgent, maxRuns: 2 });
+    const results = await Promise.allSettled(["a", "b", "c", "d", "e", "f"].map((job) => runner.submit("contact", job)));
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 2);
+    assert.equal(results.filter((result) => result.reason?.status === 429).length, 4);
+    await runner.idle();
+  });
+
+test("a save that never answers times out and lets the next run in", async () =>
+  {
+    const store = new MemoryRunStore();
+    const create = store.create.bind(store);
+    store.create = async () =>
+      {
+        store.create = create;
+        return new Promise(() => {});
+      };
+    const cap = new SpendingCap({ store, maxRuns: 20, maxUsd: 1 });
+    const runner = new Runner({ store, cap, tasks: new Map([["contact", task]]), buildAgent: slowAgents().buildAgent, logFor: () => new MemoryLog(), admitMs: 30 });
+
+    const stuck = runner.submit("contact", "a");
+    const next = runner.submit("contact", "b");
+    await assert.rejects(stuck, /Starting a run took longer than/);
+    assert.equal((await next).job, "b");
+    await runner.idle();
+  });
+
 test("the daily budget turns new runs away", async () =>
   {
     const store = new MemoryRunStore([{ id: "old", cost: 1.5, createdAt: new Date() }]);

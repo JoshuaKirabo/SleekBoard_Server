@@ -1,8 +1,13 @@
 import { StatusCodes } from "http-status-codes";
 import { Deadline } from "./Deadline.js";
+import { Lock } from "./Lock.js";
 
 // How long a whole run gets. Runs should take 30 to 90 seconds, so this is double the slowest.
 const RUN_MS = 3 * 60_000;
+
+// How long checking the cap and saving a new run gets. It's three quick database calls, so 10 seconds means Mongo is
+// stuck.
+const ADMIT_MS = 10_000;
 
 // Runs agents in the background. Pressing Run gets a reply straight away, and the work carries on here, two at a time
 // so 80 jobs can't all fire at once and choke the database.
@@ -11,7 +16,7 @@ const RUN_MS = 3 * 60_000;
 // logFor makes one run's log. Tests swap all three for fakes.
 export class Runner
   {
-    constructor({ store, cap, tasks, buildAgent, logFor, slots = 2, runMs = RUN_MS })
+    constructor({ store, cap, tasks, buildAgent, logFor, slots = 2, runMs = RUN_MS, admitMs = ADMIT_MS })
       {
         this.store = store;
         this.cap = cap;
@@ -20,6 +25,8 @@ export class Runner
         this.logFor = logFor;
         this.slots = slots;
         this.runMs = runMs;
+        this.admitMs = admitMs;
+        this.lock = new Lock();
         this.queue = [];
         this.running = new Set();
       }
@@ -28,10 +35,18 @@ export class Runner
     async submit(kind, jobId)
       {
         const task = this.taskFor(kind);
-        await this.cap.check();
-        const run = await this.store.create({ kind, job: jobId });
+        const run = await this.lock.hold(() => new Deadline(this.admitMs, "Starting a run").race(this.admit(kind, jobId)));
         this.enqueue({ run, task });
         return run;
+      }
+
+    // Checks the cap and saves the run. It always runs under the lock, because two presses that check together both
+    // see room before either has saved, and both get in. The deadline stops a stuck database call from jamming the
+    // lock for every run after it.
+    async admit(kind, jobId)
+      {
+        await this.cap.check();
+        return this.store.create({ kind, job: jobId });
       }
 
     taskFor(kind)
