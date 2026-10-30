@@ -133,6 +133,33 @@ test("a run stops before the model call that would go past its budget", async ()
     assert.equal(budget.spent.toFixed(2), "0.12");
   });
 
+// Problem #7: the reply that crosses the budget used to get all its tools run, and with web_search each one costs
+// money. claude-code-from-scratch checks its budget once a reply lands, before any of its tools run.
+test("the reply that crosses the budget doesn't get its tools run", async () =>
+  {
+    const ran = [];
+    const counter = { name: "count", description: "Counts.", parameters: { type: "object" }, run: async () => ran.push("ran") };
+    const calls = (id) => Array.from({ length: 40 }, (_, i) => toolCall(`${id}-${i}`, "count", {}));
+    const ai = new ScriptedAi([{ role: "assistant", content: null, tool_calls: calls("a") }, { role: "assistant", content: null, tool_calls: calls("b") }], pricey);
+    const log = new MemoryLog();
+    const agent = new Agent({ ai, toolbox: new Toolbox([counter]), log, maxSteps: 12, budget: new RunBudget(0.05) });
+
+    await assert.rejects(agent.run({ system: "s", task: "t" }), /This run used its \$0\.05 budget/);
+    // The first reply ($0.03) was under, so its 40 ran. The second took the run to $0.06, so none of its 40 did.
+    assert.equal(ran.length, 40);
+    assert.equal(log.steps.filter((step) => step.type === "tool").length, 40);
+  });
+
+test("a final answer that crosses the budget still lands", async () =>
+  {
+    const ai = new ScriptedAi([{ role: "assistant", content: "Done." }], pricey);
+    const budget = new RunBudget(0.02);
+    const agent = new Agent({ ai, toolbox: new Toolbox([echo]), log: new MemoryLog(), budget });
+
+    assert.equal(await agent.run({ system: "s", task: "t" }), "Done.");
+    assert.equal(budget.spent.toFixed(2), "0.03");
+  });
+
 test("a run under its budget finishes and is charged what the log bills", async () =>
   {
     const ai = new ScriptedAi([{ role: "assistant", content: null, tool_calls: [toolCall("c1", "echo", { text: "hi" })] }, { role: "assistant", content: "Done." }]);

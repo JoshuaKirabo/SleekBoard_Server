@@ -3,11 +3,15 @@ const MAX_QUERY = 300;
 
 // The web_search tool the model gets. It searches through ExaClient and hands the model back plain text: each
 // result's title, link, date, the person's current job when Exa knows it, and the highlights Exa picked out.
+//
+// perRun is how many searches one run gets. 3 is career-ops' ceiling for finding a contact, which is the first task
+// that will use it. A task that needs more can pass its own.
 export class WebSearch
   {
-    constructor({ exa })
+    constructor({ exa, perRun = 3 })
       {
         this.exa = exa;
+        this.perRun = perRun;
         this.name = "web_search";
         this.description = "Search the web. Each result comes back with its title, link and the most relevant passages from the page. LinkedIn profiles come back with the person's current job.";
         this.parameters = { type: "object", properties: { query: { type: "string", description: "What to search for, in a few words." } }, required: ["query"] };

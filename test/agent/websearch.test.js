@@ -242,3 +242,64 @@ test("the run's log sends a search's cost to the store as a usage entry, which i
     await new RunLog({ store, runId: "run-1" }).addToolCost("web_search", 0.007);
     assert.deepEqual(saved, [{ id: "run-1", entry: { tool: "web_search", cost: 0.007 } }]);
   });
+
+// Problem #7: nothing capped how many searches a run made, and each one is paid. career-ops sets three as a hard
+// ceiling for finding a contact, but only in its prompt; here the Toolbox enforces it.
+
+const paidAnswers = (count) => Array.from({ length: count }, () => jsonResponse(200, { results: [], costDollars: { total: 0.007 } }));
+
+test("a run gets 3 searches, and the model is told to answer once they're used", async () =>
+  {
+    const { fake, tool } = searchWith(paidAnswers(10));
+    const calls = Array.from({ length: 10 }, (_, i) => toolCall(`c${i}`, "web_search", { query: `q${i}` }));
+    const ai = new ScriptedAi([{ role: "assistant", content: "", tool_calls: calls }, { role: "assistant", content: "Done." }]);
+    const log = new MemoryLog();
+    const budget = new RunBudget(0.1);
+    const agent = new Agent({ ai, toolbox: new Toolbox([tool]), log, maxSteps: 3, budget });
+
+    assert.equal(await agent.run({ system: "s", task: "t" }), "Done.");
+    assert.equal(fake.requests.length, 3);
+    assert.equal(log.usage.filter((entry) => entry.tool === "web_search").length, 3);
+    const answers = ai.calls[1].messages.filter((message) => message.role === "tool");
+    assert.equal(answers.length, 10);
+    assert.equal(answers[3].content, "Error: You've used all 3 web_search calls for this run. Answer with what you have.");
+  });
+
+test("the limit holds across replies, and a refused query still uses one up", async () =>
+  {
+    const { fake, tool } = searchWith(paidAnswers(10));
+    const ai = new ScriptedAi(
+      [
+        { role: "assistant", content: "", tool_calls: [toolCall("c1", "web_search", { query: "" }), toolCall("c2", "web_search", { query: "a" })] },
+        { role: "assistant", content: "", tool_calls: [toolCall("c3", "web_search", { query: "b" }), toolCall("c4", "web_search", { query: "c" })] },
+        { role: "assistant", content: "Done." },
+      ]);
+    const agent = new Agent({ ai, toolbox: new Toolbox([tool]), log: new MemoryLog(), maxSteps: 3 });
+
+    assert.equal(await agent.run({ system: "s", task: "t" }), "Done.");
+    assert.equal(fake.requests.length, 2);
+    assert.match(ai.calls[2].messages.at(-1).content, /used all 3 web_search calls/);
+  });
+
+test("each run starts with its own 3, and a task can give a tool more", async () =>
+  {
+    const { fake, tool } = searchWith(paidAnswers(10));
+    for(const toolbox of [new Toolbox([tool]), new Toolbox([tool])])
+      {
+        for(let i = 0; i < 3; i++) await toolbox.call("web_search", { query: "q" });
+        await assert.rejects(toolbox.call("web_search", { query: "q" }), /used all 3/);
+      }
+    assert.equal(fake.requests.length, 6);
+
+    const roomy = new Toolbox([new WebSearch({ exa: new ExaClient({ apiKey: "k", fetch: new FakeFetch(paidAnswers(5)).fetch }), perRun: 5 })]);
+    for(let i = 0; i < 5; i++) await roomy.call("web_search", { query: "q" });
+    await assert.rejects(roomy.call("web_search", { query: "q" }), /used all 5/);
+  });
+
+test("a tool with no perRun has no limit", async () =>
+  {
+    let ran = 0;
+    const toolbox = new Toolbox([{ name: "free", description: "", parameters: { type: "object" }, run: async () => ++ran }]);
+    for(let i = 0; i < 50; i++) await toolbox.call("free", {});
+    assert.equal(ran, 50);
+  });

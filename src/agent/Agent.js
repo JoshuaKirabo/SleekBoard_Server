@@ -8,7 +8,8 @@ const STEP_TEXT = 300;
 //
 // signal belongs to the run's deadline. Once it flips, the loop stops before its next trip to the model, and the
 // trip or tool already going gets told to stop too, so a timed-out run doesn't keep spending. budget is the run's
-// RunBudget, and the loop stops the same way once it's used up.
+// RunBudget, and the loop stops the same way once it's used up: before a trip to the model, and before running the
+// tools a reply asked for.
 export class Agent
   {
     constructor({ ai, toolbox, log, maxSteps = 12, signal, budget })
@@ -33,6 +34,9 @@ export class Agent
             this.budget?.ensureRoom();
             const reply = await this.ask(conversation);
             if(!reply.tool_calls?.length) return reply.content || "";
+            // Checked again once the reply is paid for, so the reply that crosses the budget can't spend more on
+            // tools. A final answer has already returned above, so it still lands.
+            this.budget?.ensureRoom();
             await this.useTools(conversation, reply.tool_calls);
           }
 
