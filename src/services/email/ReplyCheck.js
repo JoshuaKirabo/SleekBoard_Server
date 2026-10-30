@@ -60,8 +60,10 @@ export class ReplyCheck
     // the AI and stop the check when the run's time is up; every reply handled so far stays handled.
     async run({ token, log, budget, signal })
       {
-        const { days, found, due, resting } = await this.inbox(token, signal);
-        const state = { token, log, budget, signal, aiLeft: this.aiPerCheck, aiUsed: 0, waiting: await this.waitingJobs() };
+        const { days, found, due, resting, address } = await this.inbox(token, signal);
+        const cards = await this.jobs.find({});
+        const waiting = cards.filter((job) => this.lanes.waiting(job.status));
+        const state = { token, log, budget, signal, aiLeft: this.aiPerCheck, aiUsed: 0, waiting, cards, me: address.toLowerCase() };
         const tally = Object.fromEntries(OUTCOMES.map((outcome) => [outcome, 0]));
         for(const id of due)
           {
@@ -93,7 +95,7 @@ export class ReplyCheck
         const handled = new Set(box.processed);
         const resting = this.restingIds(box);
         const due = ids.filter((id) => !handled.has(id) && !resting.has(id));
-        return { days, found: ids.length, due, resting: ids.filter((id) => resting.has(id)).length };
+        return { days, found: ids.length, due, resting: ids.filter((id) => resting.has(id)).length, address: String(box.address || "") };
       }
 
     // Replies tried within the last 10 minutes.
@@ -109,12 +111,6 @@ export class ReplyCheck
         if(outcome === "left") return this.mailbox.leave(id);
         if(outcome === "deferred") return null;
         return this.mailbox.remember(id);
-      }
-
-    // The cards a reply can still move, read once a check and kept up to date as cards move.
-    async waitingJobs()
-      {
-        return this.jobs.find({ status: { $in: this.lanes.waitingLanes() } });
       }
 
     // Opens one message and handles it. One Gmail can't open waits for the next check, like theirs.
@@ -135,18 +131,40 @@ export class ReplyCheck
 
     async handle(email, state)
       {
+        if(this.fromMe(email, state)) return "ignored";
         const verdict = this.sorter.sort(email.subject, email.body);
         if(verdict.kind === "auto_reply") return "ignored";
         if(this.sorter.sure(verdict)) return this.byPhrases(email, verdict, state);
         return this.byAi(email, state);
       }
 
-    // Sure from the phrases alone. No card to match means it's tried again, in case you add the job.
+    // Mail you sent. The search already leaves it out (-from:me), but an alias or a forward can still look like it came
+    // from your own address.
+    fromMe(email, state)
+      {
+        return Boolean(state.me) && this.match.addressOf(email.from) === state.me;
+      }
+
+    // Sure from the phrases alone. Several cards at the company and no role named: the AI picks, since it sees each
+    // card's role. A card that's already done (To Apply, Offer, Rejected) just keeps the reply. No card at all means
+    // it's tried again later, in case you add the job.
     async byPhrases(email, verdict, state)
       {
         const job = this.match.jobFor(email, state.waiting);
+        if(job) return this.apply(job, this.lanes.afterPhrases(job.status, verdict.kind), email, state);
+        if(this.match.ambiguous(email, state.waiting)) return this.byAi(email, state);
+        return this.settled(email, state);
+      }
+
+    // A reply for a card that isn't waiting on one. Kept on the card and handled, instead of retried every 10 minutes
+    // for three days. Before this, a rejection for a card you'd already moved to Rejected did exactly that.
+    async settled(email, state)
+      {
+        const done = state.cards.filter((card) => !this.lanes.waiting(card.status));
+        const job = this.match.jobFor(email, done) || this.match.candidates(email, done)[0];
         if(!job) return "left";
-        return this.apply(job, this.lanes.afterPhrases(job.status, verdict.kind), email, state);
+        await this.desk.note(job, email);
+        return "noted";
       }
 
     // Unclear, so the AI reads it, while this check still has AI reads left.
@@ -203,11 +221,13 @@ export class ReplyCheck
         return "suggested";
       }
 
-    // Swaps in the card as it is now, or drops it once it's no longer waiting on a reply.
+    // Swaps in the card as it is now, and drops it from the waiting ones once it's no longer waiting on a reply.
     refresh(state, job)
       {
         if(!job) return;
-        const others = state.waiting.filter((one) => String(one._id) !== String(job._id));
+        const same = (one) => String(one._id) === String(job._id);
+        state.cards = [...state.cards.filter((one) => !same(one)), job];
+        const others = state.waiting.filter((one) => !same(one));
         state.waiting = this.lanes.waiting(job.status) ? [...others, job] : others;
       }
 

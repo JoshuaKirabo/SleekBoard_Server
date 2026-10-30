@@ -25,13 +25,19 @@ export class ReplyMatch
         this.keys = keys;
       }
 
+    // The address an email came from, lowercased: "Kpler Talent <No-Reply@greenhouse-mail.io>" is
+    // no-reply@greenhouse-mail.io.
+    addressOf(from)
+      {
+        const text = String(from || "");
+        return (text.includes("<") && text.includes(">") ? text.split("<")[1].split(">")[0] : text).trim().toLowerCase();
+      }
+
     // The domain an email came from: "Kpler Talent <no-reply@greenhouse-mail.io>" is greenhouse-mail.io.
     domainOf(from)
       {
-        const text = String(from || "");
-        const address = text.includes("<") && text.includes(">") ? text.split("<")[1].split(">")[0] : text;
-        const parts = address.split("@");
-        return parts.length > 1 ? parts[1].toLowerCase() : "";
+        const parts = this.addressOf(from).split("@");
+        return parts.length > 1 ? parts[1] : "";
       }
 
     // The words that identify a company. Suffixes and anything under 3 letters go, unless that leaves nothing.
@@ -72,16 +78,40 @@ export class ReplyMatch
         return Boolean(name) && String(email.body || "").toLowerCase().includes(name);
       }
 
-    // The job this email is about, out of the jobs still waiting on a reply. A sender match wins outright. A body-only
-    // match is held back until every job's been checked, in case a later one matches on the sender.
+    // The job this email is about, or null. The sender decides it; only when no card matches the sender does the full
+    // company name in the body count. One more change from theirs: when several cards match (two Figma roles), the
+    // one whose role the email names wins. Theirs took whichever came first, so a rejection for one role could land on
+    // the other. If the email names none or more than one, it's null and ambiguous() says so.
     jobFor(email, jobs)
       {
-        let fallback = null;
-        for(const job of jobs)
+        const found = this.candidates(email, jobs);
+        if(found.length <= 1) return found[0] || null;
+        return this.byRole(email, found);
+      }
+
+    // True when more than one card matches and the email doesn't say which role it's about.
+    ambiguous(email, jobs)
+      {
+        const found = this.candidates(email, jobs);
+        return found.length > 1 && !this.byRole(email, found);
+      }
+
+    // Every card the sender matches, or failing that every card the body names in full.
+    candidates(email, jobs)
+      {
+        const bySender = jobs.filter((job) => this.inSender(job.company, email));
+        return bySender.length ? bySender : jobs.filter((job) => this.inBody(job.company, email));
+      }
+
+    // The one card whose role is written out in the subject or body, or null when it's none or several.
+    byRole(email, jobs)
+      {
+        const text = ` ${this.fold(`${email.subject || ""} ${email.body || ""}`)} `;
+        const named = jobs.filter((job) =>
           {
-            if(this.inSender(job.company, email)) return job;
-            if(!fallback && this.inBody(job.company, email)) fallback = job;
-          }
-        return fallback;
+            const role = this.fold(job.role);
+            return Boolean(role) && text.includes(` ${role} `);
+          });
+        return named.length === 1 ? named[0] : null;
       }
   }

@@ -34,11 +34,11 @@ const mail =
 
 const answer = (fields) => ({ role: "assistant", content: JSON.stringify({ match_index: null, status: "no_change", confidence: 0, summary: "", ...fields }) });
 
-const setup = ({ inbox, processed = [], caughtUp = false, ai = [], fail = [], cards = CARDS } = {}) =>
+const setup = ({ inbox, processed = [], caughtUp = false, ai = [], fail = [], cards = CARDS, address = "" } = {}) =>
   {
     const Job = new MemoryJobs(cards);
     const clock = { now: 1_000_000_000 };
-    const box = { processed: [...processed], resting: [], caughtUp, checks: [] };
+    const box = { processed: [...processed], resting: [], caughtUp, checks: [], address };
     const queries = [];
     const gmail =
       {
@@ -137,11 +137,15 @@ test("a reply with no card doesn't hold up the first look", async () =>
     assert.deepEqual(box.checks, [true]);
   });
 
-test("a Saved card isn't waiting on a reply, so it's left alone", async () =>
+test("a reply for a card that isn't waiting keeps the reply and is handled, not retried", async () =>
   {
-    const { Job, go } = setup({ inbox: { m1: mail.figmaYes } });
-    assert.equal((await go()).left, 1);
-    assert.equal((await Job.findById("figma")).status, "saved");
+    const { Job, box, go } = setup({ inbox: { m1: mail.figmaYes } });
+    assert.equal((await go()).noted, 1);
+    const figma = await Job.findById("figma");
+    assert.equal(figma.status, "saved");
+    assert.match(figma.replySnippet, /schedule an interview/);
+    assert.deepEqual(box.processed, ["m1"]);
+    assert.deepEqual(box.resting, []);
   });
 
 test("replies already handled aren't read again", async () =>
@@ -243,7 +247,7 @@ test("a card moved by one reply isn't moved again by the next", async () =>
     const { Job, go } = setup({ inbox: { m1: mail.stripeNo, m2: second } });
     const result = await go();
     assert.equal(result.moved, 1);
-    assert.equal(result.left, 1);
+    assert.equal(result.noted, 1);
     assert.equal((await Job.findById("stripe")).moves.length, 1);
   });
 
@@ -269,4 +273,34 @@ test("hasNew is true only while a reply is due", async () =>
     assert.equal(await check.hasNew("tok"), false);
     clock.now += 10 * 60_000 + 1;
     assert.equal(await check.hasNew("tok"), true);
+  });
+
+test("mail you sent never moves a card", async () =>
+  {
+    const sent = { from: "Joshua Kirabo <JoshuaK2001@gmail.com>", subject: "Stripe SWE role, referral?", body: "Would you have availability for a quick call? Happy to schedule a call." };
+    const { Job, go } = setup({ inbox: { m1: sent }, address: "joshuak2001@gmail.com" });
+    assert.equal((await go()).ignored, 1);
+    assert.equal((await Job.findById("stripe")).status, "applied");
+  });
+
+test("with two roles at one company, the reply lands on the role it names", async () =>
+  {
+    const cards = [{ _id: "figma-swe", company: "Figma", role: "Software Engineer", status: "applied" }, { _id: "figma-pm", company: "Figma", role: "Product Manager", status: "applied" }];
+    const no = { from: "Figma <no-reply@figma.com>", subject: "Your application for Product Manager", body: "Unfortunately, we have decided not to move forward." };
+    const { Job, go } = setup({ inbox: { m1: no }, cards });
+    assert.equal((await go()).moved, 1);
+    assert.equal((await Job.findById("figma-pm")).status, "rejected");
+    assert.equal((await Job.findById("figma-swe")).status, "applied");
+  });
+
+test("with two roles and neither named, the AI picks instead of a guess", async () =>
+  {
+    const cards = [{ _id: "figma-swe", company: "Figma", role: "Software Engineer", status: "applied" }, { _id: "figma-pm", company: "Figma", role: "Product Manager", status: "applied" }];
+    const no = { from: "Figma <no-reply@figma.com>", subject: "Your application", body: "Unfortunately, we have decided not to move forward." };
+    const { Job, model, go } = setup({ inbox: { m1: no }, cards, ai: [answer({ match_index: 2, status: "rejected", confidence: 90 })] });
+    assert.equal((await go()).moved, 1);
+    assert.equal(model.calls.length, 1);
+    assert.match(model.calls[0].messages[1].content, /1\. Figma — Software Engineer.*\n2\. Figma — Product Manager/s);
+    assert.equal((await Job.findById("figma-pm")).status, "rejected");
+    assert.equal((await Job.findById("figma-swe")).status, "applied");
   });

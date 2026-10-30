@@ -32,12 +32,14 @@ export class GmailSearch
         this.exclusions = exclusions;
       }
 
-    // in:anywhere newer_than:3d ((from:… OR from:…) OR (subject:"…" OR …)) -subject:"…". in:anywhere is on purpose:
+    // in:anywhere newer_than:3d -from:me ((from:… OR …) OR (subject:"…" OR …)) -subject:"…". in:anywhere is on purpose:
     // some job sites auto-archive their rejections, and JobNavigator found the API's spam-and-trash flag alone didn't
     // turn those up.
     query(days)
       {
-        const parts = ["in:anywhere", `newer_than:${days}d`];
+        // -from:me leaves out mail you sent. Theirs read it too, so asking a recruiter "do you have availability for a
+        // call?" counted as an interview invite.
+        const parts = ["in:anywhere", `newer_than:${days}d`, "-from:me"];
         const match = this.matchBlock();
         if(match) parts.push(match);
         const left = this.exclusions.map((term) => `-subject:"${term}"`).join(" ");

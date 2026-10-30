@@ -9,14 +9,14 @@ const b64 = (text) => Buffer.from(text, "utf8").toString("base64url");
 test("the search is JobNavigator's shape", () =>
   {
     const search = new GmailSearch({ senders: ["careers@", "@lever.co", "ashbyhq.com"], subjects: ["interview", "offer"], exclusions: ["webinar"] });
-    assert.equal(search.query(3), 'in:anywhere newer_than:3d ((from:"careers@" OR from:@lever.co OR from:@ashbyhq.com) OR (subject:"interview" OR subject:"offer")) -subject:"webinar"');
+    assert.equal(search.query(3), 'in:anywhere newer_than:3d -from:me ((from:"careers@" OR from:@lever.co OR from:@ashbyhq.com) OR (subject:"interview" OR subject:"offer")) -subject:"webinar"');
   });
 
 test("the search works with only senders, only subjects, or neither", () =>
   {
-    assert.equal(new GmailSearch({ senders: ["@lever.co"], subjects: [], exclusions: [] }).query(90), "in:anywhere newer_than:90d (from:@lever.co)");
-    assert.equal(new GmailSearch({ senders: [], subjects: ["offer"], exclusions: [] }).query(3), 'in:anywhere newer_than:3d (subject:"offer")');
-    assert.equal(new GmailSearch({ senders: [], subjects: [], exclusions: [] }).query(3), "in:anywhere newer_than:3d");
+    assert.equal(new GmailSearch({ senders: ["@lever.co"], subjects: [], exclusions: [] }).query(90), "in:anywhere newer_than:90d -from:me (from:@lever.co)");
+    assert.equal(new GmailSearch({ senders: [], subjects: ["offer"], exclusions: [] }).query(3), 'in:anywhere newer_than:3d -from:me (subject:"offer")');
+    assert.equal(new GmailSearch({ senders: [], subjects: [], exclusions: [] }).query(3), "in:anywhere newer_than:3d -from:me");
   });
 
 test("the default search has their lists", () =>
