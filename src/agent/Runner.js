@@ -1,6 +1,7 @@
 import { StatusCodes } from "http-status-codes";
 import { Deadline } from "./Deadline.js";
 import { Lock } from "./Lock.js";
+import { RunBudget } from "./RunBudget.js";
 
 // How long a whole run gets. Runs should take 30 to 90 seconds, so this is double the slowest.
 const RUN_MS = 3 * 60_000;
@@ -9,6 +10,10 @@ const RUN_MS = 3 * 60_000;
 // stuck.
 const ADMIT_MS = 10_000;
 
+// What one run may spend unless its task says otherwise. A contact search costs 1 to 2 cents, so this only stops a run
+// that's gone wrong, like one resending long pages for 12 steps (about 10 cents on rung 2, 47 on rung 3).
+export const RUN_USD = 0.1;
+
 // Runs agents in the background. Pressing Run gets a reply straight away, and the work carries on here, two at a time
 // so 80 jobs can't all fire at once and choke the database.
 //
@@ -16,7 +21,7 @@ const ADMIT_MS = 10_000;
 // logFor makes one run's log. Tests swap all three for fakes.
 export class Runner
   {
-    constructor({ store, cap, tasks, buildAgent, logFor, slots = 2, runMs = RUN_MS, admitMs = ADMIT_MS })
+    constructor({ store, cap, tasks, buildAgent, logFor, slots = 2, runMs = RUN_MS, admitMs = ADMIT_MS, runUsd = RUN_USD })
       {
         this.store = store;
         this.cap = cap;
@@ -26,6 +31,7 @@ export class Runner
         this.slots = slots;
         this.runMs = runMs;
         this.admitMs = admitMs;
+        this.runUsd = runUsd;
         this.lock = new Lock();
         this.queue = [];
         this.running = new Set();
@@ -35,18 +41,24 @@ export class Runner
     async submit(kind, jobId)
       {
         const task = this.taskFor(kind);
-        const run = await this.lock.hold(() => new Deadline(this.admitMs, "Starting a run").race(this.admit(kind, jobId)));
+        const run = await this.lock.hold(() => new Deadline(this.admitMs, "Starting a run").race(this.admit(kind, jobId, this.budgetFor(task))));
         this.enqueue({ run, task });
         return run;
       }
 
-    // Checks the cap and saves the run. It always runs under the lock, because two presses that check together both
-    // see room before either has saved, and both get in. The deadline stops a stuck database call from jamming the
-    // lock for every run after it.
-    async admit(kind, jobId)
+    // Checks the cap and saves the run with its budget. The budget goes on the run so the cap can hold it for the run
+    // until it ends. It always runs under the lock, because two presses that check together both see room before
+    // either has saved, and both get in. The deadline stops a stuck database call from jamming the lock for every run
+    // after it.
+    async admit(kind, jobId, budget)
       {
-        await this.cap.check();
-        return this.store.create({ kind, job: jobId });
+        await this.cap.check(budget);
+        return this.store.create({ kind, job: jobId, budget });
+      }
+
+    budgetFor(task)
+      {
+        return task.maxUsd ?? this.runUsd;
       }
 
     taskFor(kind)
@@ -91,7 +103,7 @@ export class Runner
         try
           {
             await log.start();
-            const agent = this.buildAgent({ task, log, signal: deadline.signal });
+            const agent = this.buildAgent({ task, log, signal: deadline.signal, budget: new RunBudget(run.budget) });
             await log.finish(await deadline.race(Promise.resolve().then(() => task.brief(run)).then((brief) => agent.run(brief))));
           }
         catch(error)

@@ -7,9 +7,9 @@ export class RunStore
         this.Run = Run;
       }
 
-    create({ kind, job })
+    create({ kind, job, budget })
       {
-        return this.Run.create({ kind, job });
+        return this.Run.create({ kind, job, budget });
       }
 
     find(id)
@@ -46,10 +46,13 @@ export class RunStore
         return this.Run.updateOne({ _id: id, status: { $in: ["queued", "running"] } }, { status: "failed", error: message, finishedAt: new Date() });
       }
 
-    // Dollars spent on runs started since this moment.
+    // Dollars spent on runs started since this moment. A run that hasn't ended counts as its whole budget, or what
+    // it's spent if that's more, because it can still spend that much. A run that's ended counts what it spent.
     async costSince(date)
       {
-        const [total] = await this.Run.aggregate([{ $match: { createdAt: { $gte: date } } }, { $group: { _id: null, cost: { $sum: "$cost" } } }]);
+        const live = { $in: ["$status", ["queued", "running"]] };
+        const held = { $max: ["$cost", { $ifNull: ["$budget", 0] }] };
+        const [total] = await this.Run.aggregate([{ $match: { createdAt: { $gte: date } } }, { $group: { _id: null, cost: { $sum: { $cond: [live, held, "$cost"] } } } }]);
         return total?.cost || 0;
       }
 

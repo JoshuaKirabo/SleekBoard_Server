@@ -9,7 +9,7 @@ import { Agent } from "./Agent.js";
 import { RunStore } from "./RunStore.js";
 import { RunLog } from "./RunLog.js";
 import { SpendingCap } from "./SpendingCap.js";
-import { Runner } from "./Runner.js";
+import { Runner, RUN_USD } from "./Runner.js";
 
 // The one place that builds the real thing. Every class above gets what it needs through its constructor, and this
 // file is where those pieces meet, like Spring's wiring without Spring. Tests skip this file and build their own.
@@ -31,11 +31,12 @@ const clientFor = (model) =>
   };
 
 // A task says where it starts on the ladder, what the model has to be able to do, and which tools it gets.
-// The signal is the run's deadline, so the agent stops when the run's time is up.
-const buildAgent = ({ task, log, signal }) =>
+// The signal is the run's deadline, so the agent stops when the run's time is up, and the budget stops it once the run
+// has spent its share.
+const buildAgent = ({ task, log, signal, budget }) =>
   {
     const model = ladder.pick(task.rung, task.ability);
-    return new Agent({ ai: clientFor(model), toolbox: new Toolbox(task.tools), log, maxSteps: task.maxSteps, signal });
+    return new Agent({ ai: clientFor(model), toolbox: new Toolbox(task.tools), log, maxSteps: task.maxSteps, signal, budget });
   };
 
 const logFor = (runId) => new RunLog({ store: runStore, runId });
@@ -47,4 +48,7 @@ const cap = new SpendingCap({ store: runStore, maxRuns: Number(process.env.AI_DA
 // Empty until piece 3 adds the contact finder.
 const tasks = new Map();
 
-export const runner = new Runner({ store: runStore, cap, tasks, buildAgent, logFor });
+// 10 cents a run unless .env or the task says otherwise.
+const runUsd = Number(process.env.AI_RUN_USD ?? RUN_USD);
+
+export const runner = new Runner({ store: runStore, cap, tasks, buildAgent, logFor, runUsd });

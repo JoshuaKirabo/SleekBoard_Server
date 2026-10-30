@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Agent } from "../../src/agent/Agent.js";
 import { Toolbox } from "../../src/agent/Toolbox.js";
+import { Model } from "../../src/agent/Model.js";
+import { RunBudget } from "../../src/agent/RunBudget.js";
 import { ScriptedAi, MemoryLog, toolCall } from "../fakes.js";
 
 const echo = { name: "echo", description: "Says it back.", parameters: { type: "object", properties: { text: { type: "string" } } }, run: async ({ text }) => ({ said: text }) };
@@ -97,4 +99,31 @@ test("extras the model sends back don't get resent", async () =>
 
     await agent.run({ system: "s", task: "t" });
     assert.equal("reasoning_content" in ai.calls[1].messages[2], false);
+  });
+
+// 3 cents a reply, since ScriptedAi always reports 1,000 tokens in.
+const pricey = new Model({ rung: 1, name: "Pricey", id: "fake/pricey", priceIn: 30, priceOut: 0, abilities: ["tools"] });
+
+test("a run stops before the model call that would go past its budget", async () =>
+  {
+    const ai = new ScriptedAi(Array.from({ length: 12 }, (_, i) => ({ role: "assistant", content: null, tool_calls: [toolCall(`c${i}`, "echo", { text: "again" })] })), pricey);
+    const log = new MemoryLog();
+    const budget = new RunBudget(0.1);
+    const agent = new Agent({ ai, toolbox: new Toolbox([echo]), log, maxSteps: 12, budget });
+
+    await assert.rejects(agent.run({ system: "s", task: "t" }), /This run used its \$0\.10 budget/);
+    assert.equal(ai.calls.length, 4);
+    assert.equal(log.usage.length, 4);
+    assert.equal(budget.spent.toFixed(2), "0.12");
+  });
+
+test("a run under its budget finishes and is charged what the log bills", async () =>
+  {
+    const ai = new ScriptedAi([{ role: "assistant", content: null, tool_calls: [toolCall("c1", "echo", { text: "hi" })] }, { role: "assistant", content: "Done." }]);
+    const log = new MemoryLog();
+    const budget = new RunBudget(0.1);
+    const agent = new Agent({ ai, toolbox: new Toolbox([echo]), log, budget });
+
+    assert.equal(await agent.run({ system: "s", task: "t" }), "Done.");
+    assert.equal(budget.spent, log.usage.reduce((total, entry) => total + entry.cost, 0));
   });

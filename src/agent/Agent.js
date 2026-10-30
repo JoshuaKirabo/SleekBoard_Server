@@ -7,16 +7,18 @@ const STEP_TEXT = 300;
 // asking for a tool. Everything it needs gets handed in, so a test can give it a scripted fake model.
 //
 // signal belongs to the run's deadline. Once it flips, the loop stops before its next trip to the model, and the
-// trip or tool already going gets told to stop too, so a timed-out run doesn't keep spending.
+// trip or tool already going gets told to stop too, so a timed-out run doesn't keep spending. budget is the run's
+// RunBudget, and the loop stops the same way once it's used up.
 export class Agent
   {
-    constructor({ ai, toolbox, log, maxSteps = 12, signal })
+    constructor({ ai, toolbox, log, maxSteps = 12, signal, budget })
       {
         this.ai = ai;
         this.toolbox = toolbox;
         this.log = log;
         this.maxSteps = maxSteps;
         this.signal = signal;
+        this.budget = budget;
       }
 
     // brief is { system, task }: the playbook and what to do this time. Gives back the model's final answer.
@@ -28,6 +30,7 @@ export class Agent
         for(let step = 0; step < this.maxSteps; step++)
           {
             this.signal?.throwIfAborted();
+            this.budget?.ensureRoom();
             const reply = await this.ask(conversation);
             if(!reply.tool_calls?.length) return reply.content || "";
             await this.useTools(conversation, reply.tool_calls);
@@ -45,10 +48,11 @@ export class Agent
         return reply.message;
       }
 
-    // Writing the reply down: its tokens get billed to the run, it joins the conversation, and any words the model
-    // said on its way to a tool go in the log.
+    // Writing the reply down: its tokens get billed to the run and charged to its budget, it joins the conversation,
+    // and any words the model said on its way to a tool go in the log.
     async record(conversation, { message, tokens })
       {
+        this.budget?.charge(this.ai.model.costOf(tokens));
         await this.log.addUsage(this.ai.model, tokens);
         conversation.addReply(message);
         if(message.content && message.tool_calls?.length) await this.log.addStep("message", message.content.slice(0, STEP_TEXT));

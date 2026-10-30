@@ -73,9 +73,9 @@ export class MemoryRunStore
         this.runs = runs;
       }
 
-    async create({ kind, job })
+    async create({ kind, job, budget })
       {
-        const run = { id: `run-${this.runs.length + 1}`, kind, job, cost: 0, createdAt: new Date() };
+        const run = { id: `run-${this.runs.length + 1}`, kind, job, budget, status: "queued", cost: 0, createdAt: new Date() };
         this.runs.push(run);
         return run;
       }
@@ -85,8 +85,15 @@ export class MemoryRunStore
         return this.runs.filter((run) => run.createdAt >= date).length;
       }
 
+    // Same rule as RunStore: a run that hasn't ended counts as its whole budget, or what it's spent if that's more.
     async costSince(date)
       {
-        return this.runs.filter((run) => run.createdAt >= date).reduce((total, run) => total + run.cost, 0);
+        return this.runs.filter((run) => run.createdAt >= date).reduce((total, run) => total + this.held(run), 0);
+      }
+
+    held(run)
+      {
+        const live = ["queued", "running"].includes(run.status);
+        return live ? Math.max(run.cost, run.budget || 0) : run.cost;
       }
   }

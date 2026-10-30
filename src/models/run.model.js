@@ -38,6 +38,8 @@ const runSchema = new mongoose.Schema(
     usage: [usageSchema],
     // The total of usage, kept alongside it so the spending cap can add up a day without opening every run.
     cost: { type: Number, default: 0 },
+    // The most this run may spend. The cap counts it in full until the run ends.
+    budget: { type: Number, default: 0 },
     result: { type: mongoose.Schema.Types.Mixed, default: null },
     error: { type: String, default: "" },
     startedAt: { type: Date, default: null },

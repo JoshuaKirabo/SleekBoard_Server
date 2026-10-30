@@ -2,7 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Runner } from "../../src/agent/Runner.js";
 import { SpendingCap } from "../../src/agent/SpendingCap.js";
-import { MemoryLog, MemoryRunStore } from "../fakes.js";
+import { Agent } from "../../src/agent/Agent.js";
+import { Toolbox } from "../../src/agent/Toolbox.js";
+import { Model } from "../../src/agent/Model.js";
+import { MemoryLog, MemoryRunStore, ScriptedAi, toolCall } from "../fakes.js";
 
 const task = { brief: async (run) => ({ system: "s", task: `job ${run.job}` }) };
 
@@ -24,7 +27,7 @@ const slowAgents = () =>
     return { stats, buildAgent };
   };
 
-const runnerWith = ({ store = new MemoryRunStore(), buildAgent, maxRuns = 20, maxUsd = 1 }) =>
+const runnerWith = ({ store = new MemoryRunStore(), buildAgent, maxRuns = 20, maxUsd = 1, runUsd, tasks = new Map([["contact", task]]) }) =>
   {
     const logs = new Map();
     const logFor = (runId) =>
@@ -33,7 +36,7 @@ const runnerWith = ({ store = new MemoryRunStore(), buildAgent, maxRuns = 20, ma
         return logs.get(runId);
       };
     const cap = new SpendingCap({ store, maxRuns, maxUsd });
-    return { logs, runner: new Runner({ store, cap, tasks: new Map([["contact", task]]), buildAgent, logFor }) };
+    return { logs, runner: new Runner({ store, cap, tasks, buildAgent, logFor, runUsd }) };
   };
 
 test("a run comes back queued and finishes in the background", async () =>
@@ -130,4 +133,84 @@ test("yesterday's spending doesn't count against today", async () =>
     const cap = new SpendingCap({ store, maxRuns: 20, maxUsd: 1 });
     assert.equal(await cap.spentToday(), 0);
     await cap.check();
+  });
+
+test("runs pressed together can't hold more than the day's budget between them", async () =>
+  {
+    const { runner } = runnerWith({ buildAgent: slowAgents().buildAgent, maxUsd: 1, runUsd: 0.5 });
+    const results = await Promise.allSettled(["a", "b", "c"].map((job) => runner.submit("contact", job)));
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 2);
+    assert.equal(results.filter((result) => result.reason?.status === 429).length, 1);
+    await runner.idle();
+  });
+
+test("a run still going counts as its whole budget, and an ended one as what it spent", async () =>
+  {
+    const now = new Date();
+    const store = new MemoryRunStore(
+      [
+        { id: "done", status: "done", cost: 0.02, budget: 0.5, createdAt: now },
+        { id: "failed", status: "failed", cost: 0.03, budget: 0.5, createdAt: now },
+        { id: "live", status: "running", cost: 0.02, budget: 0.5, createdAt: now },
+        { id: "over", status: "running", cost: 0.6, budget: 0.5, createdAt: now },
+      ]);
+    const cap = new SpendingCap({ store, maxRuns: 20, maxUsd: 5 });
+    assert.equal((await cap.spentToday()).toFixed(2), "1.15");
+  });
+
+test("a new run's whole budget has to fit in what's left of the day", async () =>
+  {
+    const store = new MemoryRunStore([{ id: "old", status: "done", cost: 0.95, createdAt: new Date() }]);
+    const tight = runnerWith({ store, buildAgent: slowAgents().buildAgent, maxUsd: 1, runUsd: 0.1 });
+    await assert.rejects(tight.runner.submit("contact", "a"), /doesn't have room for another run/);
+
+    const small = runnerWith({ store, buildAgent: slowAgents().buildAgent, maxUsd: 1, runUsd: 0.05 });
+    assert.equal((await small.runner.submit("contact", "b")).budget, 0.05);
+    await small.runner.idle();
+  });
+
+test("a task's own budget goes on its run and to its agent", async () =>
+  {
+    let given;
+    const buildAgent = ({ budget }) =>
+      {
+        given = budget;
+        return { run: async () => "ok" };
+      };
+    const { runner } = runnerWith({ buildAgent, tasks: new Map([["contact", { ...task, maxUsd: 0.25 }]]) });
+
+    const run = await runner.submit("contact", "a");
+    await runner.idle();
+    assert.equal(run.budget, 0.25);
+    assert.equal(given.maxUsd, 0.25);
+  });
+
+test("a run that keeps spending fails with its budget message and frees its slot", async () =>
+  {
+    const pricey = new Model({ rung: 1, name: "Pricey", id: "fake/pricey", priceIn: 30, priceOut: 0, abilities: ["tools"] });
+    const echo = { name: "echo", description: "Says it back.", parameters: { type: "object" }, run: async () => "again" };
+    const looping = () => new ScriptedAi(Array.from({ length: 12 }, (_, i) => ({ role: "assistant", content: null, tool_calls: [toolCall(`c${i}`, "echo", {})] })), pricey);
+    let built = 0;
+    const buildAgent = ({ log, budget }) =>
+      {
+        built++;
+        if(built === 2) return { run: async () => "second run worked" };
+        return new Agent({ ai: looping(), toolbox: new Toolbox([echo]), log, maxSteps: 12, budget });
+      };
+    const store = new MemoryRunStore();
+    const logs = new Map();
+    const logFor = (runId) =>
+      {
+        logs.set(runId, new MemoryLog());
+        return logs.get(runId);
+      };
+    const cap = new SpendingCap({ store, maxRuns: 20, maxUsd: 1 });
+    const runner = new Runner({ store, cap, tasks: new Map([["contact", task]]), buildAgent, logFor, slots: 1 });
+
+    const runaway = await runner.submit("contact", "a");
+    const next = await runner.submit("contact", "b");
+    await runner.idle();
+    assert.equal(logs.get(runaway.id).error, "This run used its $0.10 budget.");
+    assert.equal(logs.get(runaway.id).usage.length, 4);
+    assert.equal(logs.get(next.id).result, "second run worked");
   });

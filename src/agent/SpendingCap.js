@@ -22,13 +22,16 @@ export class SpendingCap
         this.now = now;
       }
 
-    // Throws when a new run would go over either limit, and does nothing when there's room. Both totals are asked for
-    // at once, since each is a trip to Atlas (about 260 ms) and every click waits its turn behind the Runner's lock.
-    async check()
+    // Throws when a new run would go over either limit, and does nothing when there's room. budget is what the new run
+    // may spend, and it has to fit in what's left of the day, so runs going at once can't add up past the limit. Both
+    // totals are asked for at once, since each is a trip to Atlas (about 260 ms) and every click waits its turn behind
+    // the Runner's lock.
+    async check(budget = 0)
       {
         const [runs, spent] = await Promise.all([this.runsToday(), this.spentToday()]);
         if(runs >= this.maxRuns) throw new CapReachedError(`That's all ${this.maxRuns} runs for today. Try again tomorrow.`);
         if(spent >= this.maxUsd) throw new CapReachedError(`Today's $${this.maxUsd} AI budget is used up. Try again tomorrow.`);
+        if(spent + budget > this.maxUsd) throw new CapReachedError(`Today's $${this.maxUsd} AI budget doesn't have room for another run. Try again tomorrow.`);
       }
 
     runsToday()
@@ -36,6 +39,7 @@ export class SpendingCap
         return this.store.countSince(this.startOfToday());
       }
 
+    // What finished runs spent plus the full budget of any still going, since those can spend up to it.
     spentToday()
       {
         return this.store.costSince(this.startOfToday());
