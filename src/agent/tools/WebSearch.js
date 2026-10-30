@@ -5,13 +5,15 @@ const MAX_QUERY = 300;
 // result's title, link, date, the person's current job when Exa knows it, and the highlights Exa picked out.
 //
 // perRun is how many searches one run gets. 3 is career-ops' ceiling for finding a contact, which is the first task
-// that will use it. A task that needs more can pass its own.
+// that will use it. A task that needs more can pass its own. seen, when given, is the run's SeenText: each result
+// goes in under its own link, so suggest_contact can check a quote against the result it came from.
 export class WebSearch
   {
-    constructor({ exa, perRun = 3 })
+    constructor({ exa, perRun = 3, seen = null })
       {
         this.exa = exa;
         this.perRun = perRun;
+        this.seen = seen;
         this.name = "web_search";
         this.description = "Search the web. Each result comes back with its title, link and the most relevant passages from the page. LinkedIn profiles come back with the person's current job.";
         this.parameters = { type: "object", properties: { query: { type: "string", description: "What to search for, in a few words." } }, required: ["query"] };
@@ -25,7 +27,15 @@ export class WebSearch
         const { results, cost } = await this.exa.search(query, signal);
         await charge?.(cost);
         if(!results.length) return `No results for "${query}".`;
-        return results.map((result, index) => this.describe(result, index + 1)).join("\n\n");
+        return results.map((result, index) => this.shown(result, index + 1)).join("\n\n");
+      }
+
+    // One result as the model will read it, noted down under its link first.
+    shown(result, number)
+      {
+        const text = this.describe(result, number);
+        this.seen?.add(result.url, text);
+        return text;
       }
 
     // Checked here so a missing or empty query never becomes a paid search. Exa would refuse an empty one anyway.

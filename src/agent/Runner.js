@@ -19,6 +19,9 @@ export const RUN_USD = 0.1;
 //
 // Everything it uses gets handed in: tasks says what each kind of run does, buildAgent makes an agent for a task, and
 // logFor makes one run's log. Tests swap all three for fakes.
+//
+// A task's start(run) gives back that run's work: brief() for the agent, tools() it may use, built fresh for the run,
+// and result(answer), which turns the agent's final answer into what the run saves.
 export class Runner
   {
     constructor({ store, cap, tasks, buildAgent, logFor, slots = 2, runMs = RUN_MS, admitMs = ADMIT_MS, runUsd = RUN_USD })
@@ -103,13 +106,20 @@ export class Runner
         try
           {
             await log.start();
-            const agent = this.buildAgent({ task, log, signal: deadline.signal, budget: new RunBudget(run.budget) });
-            await log.finish(await deadline.race(Promise.resolve().then(() => task.brief(run)).then((brief) => agent.run(brief))));
+            await log.finish(await deadline.race(this.work({ task, run, log, signal: deadline.signal })));
           }
         catch(error)
           {
             await log.fail(error);
           }
+      }
+
+    // Starts the task's work for this run, gives an agent its tools, and turns the agent's answer into the result.
+    async work({ task, run, log, signal })
+      {
+        const work = await task.start(run);
+        const agent = this.buildAgent({ task, tools: work.tools(), log, signal, budget: new RunBudget(run.budget) });
+        return work.result(await agent.run(work.brief()));
       }
 
     // Waits until nothing is queued or running. Tests use it, and so could a clean shutdown.

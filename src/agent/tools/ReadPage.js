@@ -13,12 +13,13 @@ const MAX_URL = 2_000;
 // the model picks; and PageText strips the tags without regexes that a crafted page could freeze.
 //
 // Reading a page is free, so it has no perRun, the same as in both reference repos. The run's budget still counts
-// the tokens each page adds.
+// the tokens each page adds. seen, when given, is the run's SeenText, so a quote from this page can be checked later.
 export class ReadPage
   {
-    constructor({ fetchPage, maxText = MAX_TEXT })
+    constructor({ fetchPage, maxText = MAX_TEXT, seen = null })
       {
         this.fetchPage = fetchPage;
+        this.seen = seen;
         this.maxText = maxText;
         this.pageText = new PageText();
         this.name = "read_page";
@@ -28,8 +29,18 @@ export class ReadPage
 
     async run(args, { signal } = {})
       {
-        const page = await this.fetchPage(this.urlFrom(args), signal);
-        return this.trimmed(this.textOf(page));
+        const url = this.urlFrom(args);
+        const page = await this.fetchPage(url, signal);
+        const text = this.trimmed(this.textOf(page));
+        this.note(text, url, page.url);
+        return text;
+      }
+
+    // Kept under the link the model asked for and the one it landed on after any redirects, since it may quote either.
+    note(text, asked, landed)
+      {
+        this.seen?.add(asked.href, text);
+        if(landed) this.seen?.add(String(landed), text);
       }
 
     // Checked here so a missing or broken link never reaches the network.

@@ -7,7 +7,8 @@ import { Toolbox } from "../../src/agent/Toolbox.js";
 import { Model } from "../../src/agent/Model.js";
 import { MemoryLog, MemoryRunStore, ScriptedAi, toolCall } from "../fakes.js";
 
-const task = { brief: async (run) => ({ system: "s", task: `job ${run.job}` }) };
+// A task the way Runner uses one: start(run) hands back the run's brief, its tools and how to read the answer.
+const task = { start: async (run) => ({ brief: () => ({ system: "s", task: `job ${run.job}` }), tools: () => [], result: (answer) => answer }) };
 
 // An agent that takes a moment, so the test can see how many run at once.
 const slowAgents = () =>

@@ -92,7 +92,7 @@ test("a run that never finishes fails on time and frees its slot", async () =>
         built++;
         return { run: built === 1 ? never : async () => "second run worked" };
       };
-    const task = { brief: () => ({ system: "s", task: "t" }) };
+    const task = { start: async () => ({ brief: () => ({ system: "s", task: "t" }), tools: () => [], result: (answer) => answer }) };
     const cap = new SpendingCap({ store, maxRuns: 20, maxUsd: 1 });
     const runner = new Runner({ store, cap, tasks: new Map([["contact", task]]), buildAgent, logFor, slots: 1, runMs: 40 });
 
