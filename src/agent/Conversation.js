@@ -43,11 +43,12 @@ export class Conversation
           }
       }
 
-    // A tool's answer goes back as text, tied to the call that asked for it.
+    // A tool's answer goes back as text, tied to the call that asked for it. A tool that hands back nothing gets
+    // "(no output)", like claude-code-from-scratch, since Together refuses a tool message with no content.
     addToolResult(callId, result)
       {
         const content = typeof result === "string" ? result : JSON.stringify(result);
-        this.list.push({ role: "tool", tool_call_id: callId, content });
+        this.list.push({ role: "tool", tool_call_id: callId, content: content || "(no output)" });
       }
 
     messages()

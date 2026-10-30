@@ -81,6 +81,22 @@ test("a broken tool, a made-up tool and bad JSON don't end the run", async () =>
     assert.equal(log.steps.filter((step) => step.type === "error").length, 3);
   });
 
+// Together turns away a tool message with no content (400, missing field 'content'), so an empty answer has to go
+// back as words.
+test("a tool that hands back nothing still answers the model", async () =>
+  {
+    const silent = (name, value) => ({ name, description: "Returns nothing useful.", parameters: { type: "object" }, run: async () => value });
+    const { agent, ai } = agentWith(
+      [
+        { role: "assistant", content: "", tool_calls: [toolCall("c1", "nothing", {}), toolCall("c2", "blank", {}), toolCall("c3", "zero", {})] },
+        { role: "assistant", content: "ok" },
+      ], [silent("nothing", undefined), silent("blank", ""), silent("zero", 0)]);
+
+    assert.equal(await agent.run({ system: "s", task: "t" }), "ok");
+    const results = ai.calls[1].messages.slice(-3).map((message) => message.content);
+    assert.deepEqual(results, ["(no output)", "(no output)", "0"]);
+  });
+
 test("a model that never stops gets cut off", async () =>
   {
     const loop = Array.from({ length: 5 }, (_, i) => ({ role: "assistant", content: "", tool_calls: [toolCall(`c${i}`, "echo", { text: "again" })] }));
