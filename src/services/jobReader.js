@@ -167,14 +167,15 @@ const toReadError = (error, host) =>
 // ---------- Fetching ----------
 
 // Follows redirects by hand so each hop gets the safety check, and stops reading once the page is big enough that
-// the useful bits (all in <head> or near the top) are long past.
-const fetchPage = async (start) =>
+// the useful bits (all in <head> or near the top) are long past. The agent's read_page tool uses it too, and hands in
+// its own signal so a page stops loading when the tool's or the run's time is up.
+export const fetchPage = async (start, stop) =>
   {
     let url = start;
     for(let hop = 0; hop <= MAX_REDIRECTS; hop++)
       {
         const host = assertPublic(url);
-        const signal = AbortSignal.timeout(TIMEOUT);
+        const signal = stop ? AbortSignal.any([AbortSignal.timeout(TIMEOUT), stop]) : AbortSignal.timeout(TIMEOUT);
         try
           {
             const response = await request(url, host, signal);
@@ -192,7 +193,7 @@ const fetchPage = async (start) =>
                 throw new ReadError(`The site wouldn't show us the page (${status}).`);
               }
 
-            return { html: await readBody(response), url };
+            return { html: await readBody(response), url, type: response.headers["content-type"] || "" };
           }
         catch(error)
           {
