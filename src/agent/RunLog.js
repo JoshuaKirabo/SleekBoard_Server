@@ -24,6 +24,12 @@ export class RunLog
         return this.store.addUsage(this.runId, { model: model.id, input: tokens.input, output: tokens.output, cost: model.costOf(tokens) });
       }
 
+    // A paid tool's bill goes in the same list as the model's, so the run's cost and the daily cap count both.
+    addToolCost(tool, cost)
+      {
+        return this.store.addUsage(this.runId, { tool, cost });
+      }
+
     finish(result)
       {
         return this.store.finish(this.runId, result);

@@ -85,6 +85,11 @@ export class MemoryLog
         this.usage.push({ model: model.id, ...tokens, cost: model.costOf(tokens) });
       }
 
+    async addToolCost(tool, cost)
+      {
+        this.usage.push({ tool, cost });
+      }
+
     async finish(result)
       {
         this.events.push("finish");
@@ -130,3 +135,26 @@ export class MemoryRunStore
         return live ? Math.max(run.cost, run.budget || 0) : run.cost;
       }
   }
+
+// A fetch that answers from a script, one answer per request, and keeps every request it was sent. An answer can be a
+// function that gets the request's signal, for a server that never answers.
+export class FakeFetch
+  {
+    constructor(answers)
+      {
+        this.answers = [...answers];
+        this.requests = [];
+        this.fetch = (url, options) => this.answer(url, options);
+      }
+
+    async answer(url, options = {})
+      {
+        this.requests.push({ url, ...options, body: options.body && JSON.parse(options.body) });
+        const answer = this.answers.shift();
+        if(!answer) throw new Error("The script ran out of answers.");
+        return typeof answer === "function" ? answer(options.signal) : answer;
+      }
+  }
+
+// A JSON answer the way Exa sends one.
+export const jsonResponse = (status, body) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });

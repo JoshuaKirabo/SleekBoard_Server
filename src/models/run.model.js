@@ -18,10 +18,12 @@ const stepSchema = new mongoose.Schema(
   { _id: false },
 );
 
-// One entry per trip to a model, so a run shows what each rung cost.
+// One entry per paid trip, so a run shows what each rung and each search cost. A trip to a model fills in model and
+// its tokens. A paid tool, like web_search, fills in tool instead.
 const usageSchema = new mongoose.Schema(
   {
-    model: { type: String, required: true },
+    model: { type: String, default: "" },
+    tool: { type: String, default: "" },
     input: { type: Number, default: 0 },
     output: { type: Number, default: 0 },
     cost: { type: Number, default: 0 },

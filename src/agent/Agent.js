@@ -72,15 +72,24 @@ export class Agent
     // else, and the log shows it.
     async callTool(call)
       {
+        const name = this.nameOf(call);
         try
           {
-            return await this.toolbox.call(this.nameOf(call), this.readArgs(call), this.signal);
+            return await this.toolbox.call(name, this.readArgs(call), { signal: this.signal, charge: (cost) => this.chargeTool(name, cost) });
           }
         catch(error)
           {
             await this.log.addStep("error", `${this.nameOf(call) || "(no name)"}: ${error.message}`.slice(0, STEP_TEXT));
             return `Error: ${error.message}`;
           }
+      }
+
+    // A paid tool, like a search, is billed the same way a reply is: to the run's budget, so the next trip to the
+    // model sees it, and to the run's record, so the daily cap does.
+    chargeTool(name, cost)
+      {
+        this.budget?.charge(cost);
+        return this.log.addToolCost(name, cost);
       }
 
     // The model sends its arguments as a JSON string, and now and then it's broken JSON.
