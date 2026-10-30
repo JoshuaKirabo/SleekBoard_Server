@@ -9,7 +9,8 @@ import { Agent } from "./Agent.js";
 import { RunStore } from "./RunStore.js";
 import { RunLog } from "./RunLog.js";
 import { SpendingCap } from "./SpendingCap.js";
-import { Runner, RUN_USD } from "./Runner.js";
+import { Runner } from "./Runner.js";
+import { AiLimits } from "./AiLimits.js";
 
 // The one place that builds the real thing. Every class above gets what it needs through its constructor, and this
 // file is where those pieces meet, like Spring's wiring without Spring. Tests skip this file and build their own.
@@ -41,14 +42,14 @@ const buildAgent = ({ task, log, signal, budget }) =>
 
 const logFor = (runId) => new RunLog({ store: runStore, runId });
 
-// 20 runs and a dollar a day unless .env says otherwise. A contact search costs about 1 to 2 cents. Setting either
-// to 0 switches AI runs off.
-const cap = new SpendingCap({ store: runStore, maxRuns: Number(process.env.AI_DAILY_RUNS ?? 20), maxUsd: Number(process.env.AI_DAILY_USD ?? 1) });
+// Read and checked here, when the server boots, so a typo in .env stops the start instead of switching the cap off.
+const limits = new AiLimits(process.env);
+
+// Setting either daily limit to 0 switches AI runs off.
+const cap = new SpendingCap({ store: runStore, maxRuns: limits.dailyRuns, maxUsd: limits.dailyUsd });
 
 // Empty until piece 3 adds the contact finder.
 const tasks = new Map();
 
-// 10 cents a run unless .env or the task says otherwise.
-const runUsd = Number(process.env.AI_RUN_USD ?? RUN_USD);
-
-export const runner = new Runner({ store: runStore, cap, tasks, buildAgent, logFor, runUsd });
+// A task can still set its own budget.
+export const runner = new Runner({ store: runStore, cap, tasks, buildAgent, logFor, runUsd: limits.runUsd });
