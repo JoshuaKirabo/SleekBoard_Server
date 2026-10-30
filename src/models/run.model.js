@@ -1,7 +1,8 @@
 import mongoose from "mongoose";
 
-// What a run can be for: finding who to contact about a job, and drafting notes to one of them.
-export const RUN_KINDS = ["contact", "note"];
+// What a run can be for: finding who to contact about a job, drafting notes to one of them, and Fill in, which reads a
+// link before its job exists, fills the card and finds the contact.
+export const RUN_KINDS = ["contact", "note", "fill"];
 
 // queued: waiting for a free slot. running: the agent's on it. done and failed are the two ways it ends.
 export const RUN_STATUSES = ["queued", "running", "done", "failed"];
@@ -33,7 +34,8 @@ const usageSchema = new mongoose.Schema(
 
 const runSchema = new mongoose.Schema(
   {
-    job: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true, index: true },
+    // A fill run starts before its job exists, and gets its job once you press Add to board.
+    job: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: [function() { return this.kind !== "fill"; }, "A run needs a job."], index: true },
     kind: { type: String, enum: { values: RUN_KINDS, message: "{VALUE} isn't a kind of run." }, required: true },
     status: { type: String, enum: RUN_STATUSES, default: "queued", index: true },
     steps: [stepSchema],
@@ -42,10 +44,12 @@ const runSchema = new mongoose.Schema(
     cost: { type: Number, default: 0 },
     // The most this run may spend. The cap counts it in full until the run ends.
     budget: { type: Number, default: 0 },
-    // What the run was asked to work on beyond its job. A note run names the contact it writes to.
+    // What the run was asked to work on beyond its job. A note run names the contact it writes to, and a fill run the
+    // link it reads.
     input:
       {
         contact: { type: mongoose.Schema.Types.ObjectId, ref: "Contact", default: undefined },
+        link: { type: String, maxlength: 2000, default: undefined },
       },
     result: { type: mongoose.Schema.Types.Mixed, default: null },
     error: { type: String, default: "" },

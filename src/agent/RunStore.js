@@ -23,6 +23,19 @@ export class RunStore
         return this.Run.find({ job: jobId }).sort({ createdAt: -1 }).limit(limit);
       }
 
+    // A run's result so far, shown while it's still going. Fill in puts the filled card here before its contact search
+    // ends, so the add sheet can show it. The run's finish writes the whole result over it.
+    showResult(id, result)
+      {
+        return this.Run.updateOne({ _id: id, status: "running" }, { $set: { result } });
+      }
+
+    // Gives a fill run its job once the card is added. Only a fill run with no job yet can get one, and only once.
+    attach(id, jobId)
+      {
+        return this.Run.updateOne({ _id: id, kind: "fill", job: null }, { $set: { job: jobId } });
+      }
+
     // Your yes or no on one of a finished run's suggestions. It only lands once per suggestion, so two clicks at the
     // same moment can't both answer it.
     decide(id, index, decision)

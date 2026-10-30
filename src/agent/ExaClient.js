@@ -1,4 +1,5 @@
 const EXA_URL = "https://api.exa.ai/search";
+const CONTENTS_URL = "https://api.exa.ai/contents";
 
 // Longest bit of Exa's own error message we pass on. Enough to say what went wrong.
 const ERROR_TEXT = 200;
@@ -6,6 +7,9 @@ const ERROR_TEXT = 200;
 // What one search cost on 2026-10-30. Charged when a reply comes back without a price we can read, so a search
 // never counts as free.
 export const SEARCH_USD = 0.007;
+
+// What one page's text costs, charged the same way when Exa's reply has no price we can read.
+export const CONTENTS_USD = 0.001;
 
 // Results per search. Exa's default of 10 came to about 22,000 characters, and every search stays in the
 // conversation, so it's re-sent on every later step. 5 is about half that, and the agent can search again if they
@@ -33,12 +37,27 @@ export class ExaClient
         return { results: reply.results || [], cost: this.costOf(reply) };
       }
 
-    // Exa puts each search's price in costDollars.total. A price that's missing, negative or not a number is charged
-    // at the usual price instead, so it can't make a search free or lower the day's total.
-    costOf(reply)
+    // One page's text by its link, from Exa's copy of it, for pages our server can't open itself (LinkedIn) or that
+    // only fill in with JavaScript (Workday). Sent the way Exa's guide says: the link plus text, nothing else. Exa
+    // answers 200 even when that page failed, so the page's own status is checked, and a failed page comes back as
+    // empty text, still paid for.
+    async contents(url, signal)
+      {
+        const response = await this.fetch(CONTENTS_URL, { method: "POST", headers: this.headers(), body: JSON.stringify({ urls: [url], text: true }), signal });
+        if(!response.ok) throw await this.failure(response);
+        const reply = await response.json();
+        const cost = this.costOf(reply, CONTENTS_USD);
+        const failed = reply.statuses?.[0] && reply.statuses[0].status !== "success";
+        const text = failed ? "" : reply.results?.[0]?.text || "";
+        return { text: typeof text === "string" ? text : "", cost };
+      }
+
+    // Exa puts each call's price in costDollars.total. A price that's missing, negative or not a number is charged
+    // at the usual price instead, so it can't make a call free or lower the day's total.
+    costOf(reply, usual = SEARCH_USD)
       {
         const cost = reply.costDollars?.total;
-        return Number.isFinite(cost) && cost >= 0 ? cost : SEARCH_USD;
+        return Number.isFinite(cost) && cost >= 0 ? cost : usual;
       }
 
     headers()

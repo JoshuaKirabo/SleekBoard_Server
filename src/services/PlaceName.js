@@ -29,6 +29,16 @@ const MAX_TEXT = 300;
 // the same shape as the rest of the board. Places outside the US are kept the way the site wrote them.
 export class PlaceName
   {
+    // Several offices in one line, the way postings list them ("San Francisco, CA • New York, NY • United States"):
+    // the first office written like the rest of the board, and a count of the others, like the link reader's "+2".
+    offices(text)
+      {
+        const offices = this.clean(text).split(/[|•;]/).map((office) => office.trim()).filter(Boolean);
+        if(!offices.length) return "";
+        const first = this.format(offices[0]);
+        return offices.length > 1 ? `${first} +${offices.length - 1}` : first;
+      }
+
     // A place as one line of text, like Greenhouse's "San Francisco, California".
     format(text)
       {

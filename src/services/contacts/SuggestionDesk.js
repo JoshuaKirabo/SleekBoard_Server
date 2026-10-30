@@ -36,7 +36,8 @@ export class SuggestionDesk
     suggestionOf(run, index)
       {
         if(!run) throw failure(StatusCodes.NOT_FOUND, "That run doesn't exist.");
-        if(run.kind !== "contact" || run.status !== "done") throw failure(StatusCodes.CONFLICT, "Only a finished contact run has suggestions to answer.");
+        if(!["contact", "fill"].includes(run.kind) || run.status !== "done") throw failure(StatusCodes.CONFLICT, "Only a finished contact run has suggestions to answer.");
+        if(!run.job) throw failure(StatusCodes.CONFLICT, "Add the job to the board before saving its contacts.");
         const suggestion = Number.isInteger(index) ? run.result?.contacts?.[index] : undefined;
         if(!suggestion) throw failure(StatusCodes.NOT_FOUND, "That suggestion doesn't exist.");
         if(suggestion.decision) throw failure(StatusCodes.CONFLICT, `You already answered ${suggestion.name}.`);

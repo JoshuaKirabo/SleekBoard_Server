@@ -76,3 +76,11 @@ test("a long run of spaces doesn't slow it down", () =>
     places.format(`Folsom,${" ".repeat(100_000)}x`);
     assert.ok(performance.now() - started < 50);
   });
+
+test("an office list comes out as the first office and a count", () =>
+  {
+    assert.equal(places.offices("San Francisco, CA • New York, NY • United States"), "San Francisco, CA +2");
+    assert.equal(places.offices("USA - CA - Folsom | USA - OR - Hillsboro"), "Folsom, CA +1");
+    assert.equal(places.offices("Seattle, Washington"), "Seattle, WA");
+    assert.equal(places.offices(""), "");
+  });

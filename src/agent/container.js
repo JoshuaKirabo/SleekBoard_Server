@@ -13,9 +13,10 @@ import { Runner } from "./Runner.js";
 import { AiLimits } from "./AiLimits.js";
 import { ExaClient } from "./ExaClient.js";
 import { ContactTask } from "./tasks/ContactTask.js";
+import { FillTask } from "./tasks/FillTask.js";
 import { NoteTask } from "./tasks/NoteTask.js";
 import { Job } from "../models/job.model.js";
-import { fetchPage } from "../services/jobReader.js";
+import { fetchPage, readJob } from "../services/jobReader.js";
 import { contactBook, jobCard } from "../services/contacts/index.js";
 import { SuggestionDesk } from "../services/contacts/SuggestionDesk.js";
 
@@ -67,6 +68,7 @@ const tasks = new Map(
   [
     ["contact", new ContactTask({ jobs: Job, exa, fetchPage, schools })],
     ["note", new NoteTask({ jobs: Job, contacts: contactBook, fetchPage })],
+    ["fill", new FillTask({ readJob, exa, fetchPage, store: runStore, schools })],
   ]);
 
 // A task can still set its own budget.
