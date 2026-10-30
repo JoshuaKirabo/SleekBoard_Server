@@ -23,6 +23,15 @@ export class EmailTask
       {
         const token = await this.tokens.access(signal);
         if(!token) return { skipped: "Gmail isn't connected." };
-        return this.check.run({ token, log, budget, signal });
+        try
+          {
+            return await this.check.run({ token, log, budget, signal });
+          }
+        catch(error)
+          {
+            // Gmail turned the token down. The next check gets a fresh one, or finds out the login's dead.
+            if(error.status === 401) this.tokens.drop();
+            throw error;
+          }
       }
   }

@@ -350,3 +350,12 @@ test("an address Gmail won't give doesn't stop the connection", async () =>
     assert.deepEqual(await connect.finish({ code: "c", state: new URL(url).searchParams.get("state"), nonce }), { ok: true, address: "" });
     assert.deepEqual(saved, [{ login: "1//r", address: "" }]);
   });
+
+test("drop forgets the access token, so the next one comes from Google", async () =>
+  {
+    let calls = 0;
+    const tokens = new GmailTokens({ mailbox: mailboxWith({ login: keys.lock("1//r") }), auth: authWith(async () => ({ token: `a${++calls}`, expiresIn: 3600 })), keys });
+    assert.equal(await tokens.access(), "a1");
+    tokens.drop();
+    assert.equal(await tokens.access(), "a2");
+  });

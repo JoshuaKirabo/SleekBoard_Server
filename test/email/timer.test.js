@@ -105,3 +105,32 @@ test("the runner runs a task with perform() without building an agent, and email
     assert.deepEqual(logs.get(second.id).events, ["start", "finish"]);
     assert.equal(first.budget, 0.02);
   });
+
+test("a token Gmail turns down is dropped, so the next tick asks Google again", async () =>
+  {
+    let dropped = 0;
+    const tokens = { ...connected, drop: () => dropped++ };
+    const check = { hasNew: async () => { throw Object.assign(new Error("Gmail answered 401"), { status: 401 }); } };
+    const timer = new MailTimer({ runner: { submit: async () => ({ id: "x" }) }, store: { find: async () => null }, tokens, check, everyMs: 60_000 });
+    const warn = console.warn;
+    console.warn = () => {};
+    try
+      {
+        assert.equal(await timer.tick(), null);
+      }
+    finally
+      {
+        console.warn = warn;
+      }
+    assert.equal(dropped, 1);
+  });
+
+test("an email run Gmail turns down drops the token and fails", async () =>
+  {
+    let dropped = 0;
+    const tokens = { ...connected, drop: () => dropped++ };
+    const check = { run: async () => { throw Object.assign(new Error("Gmail answered 401"), { status: 401 }); } };
+    const work = await new EmailTask({ check, tokens }).start({}, {});
+    await assert.rejects(work.perform(), /401/);
+    assert.equal(dropped, 1);
+  });

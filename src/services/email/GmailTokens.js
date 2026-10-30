@@ -88,6 +88,14 @@ export class GmailTokens
           }
       }
 
+    // Gmail turned the access token down (a 401). Forget it, so the next one comes fresh from Google, and if the login
+    // itself is dead, Google says so then and it's marked expired. Without this a dead login looks connected for up to
+    // the hour the old token had left.
+    drop()
+      {
+        this.cached = null;
+      }
+
     // Saves a new login, locked, for this Gmail address.
     async save(login, address)
       {

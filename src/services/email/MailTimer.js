@@ -60,7 +60,16 @@ export class MailTimer
     async due()
       {
         const token = await this.tokens.access();
-        return Boolean(token) && this.check.hasNew(token);
+        if(!token) return false;
+        try
+          {
+            return await this.check.hasNew(token);
+          }
+        catch(error)
+          {
+            if(error.status === 401) this.tokens.drop();
+            throw error;
+          }
       }
 
     // True while the last check this timer started is queued or running.
