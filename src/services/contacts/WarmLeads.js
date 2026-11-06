@@ -23,7 +23,7 @@ export class WarmLeads
     // alreadyInPhonebook).
     async forJob(job)
       {
-        const [saved, contacts, connections] = await Promise.all([this.book.forJob(job._id), this.book.atCompany(job.company, job._id), this.connections.matchesFor(job.company)]);
+        const [saved, contacts, connections] = await Promise.all([this.book.forJob(job.id), this.book.atCompany(job.company, job.id), this.connections.matchesFor(job.company)]);
         const known = new Set([...saved, ...contacts].map((contact) => this.book.nameKeyOf(contact.name)));
         const fresh = connections.filter((connection) => !known.has(this.book.nameKeyOf(connection.name)));
         return { saved, leads: { contacts, connections: fresh, secondDegreeSearch: this.connections.secondDegreeSearch(job.company) } };
@@ -32,9 +32,9 @@ export class WarmLeads
     // Takes on someone you already saved, for this job too.
     async useContact(job, contactId)
       {
-        const contact = await this.book.link(contactId, job._id);
+        const contact = await this.book.link(contactId, job.id);
         if(!contact) throw notFound("That contact doesn't exist.");
-        return { contact, job: await this.card.fill(job._id, contact) };
+        return { contact, job: await this.card.fill(job.id, contact) };
       }
 
     // Turns a LinkedIn connection into a saved contact for this job, the step career-ops leaves to you by hand
@@ -46,7 +46,7 @@ export class WarmLeads
         const connection = await this.connections.find(connectionId);
         if(!connection) throw notFound("That connection doesn't exist. Upload your connections again.");
         const fields = { name: connection.name, company: job.company, type: "internal_referral", title: connection.title, email: connection.email, link: connection.linkedin, connectedOn: connection.connectedOn, source: "linkedin" };
-        const contact = await this.book.save(fields, job._id);
-        return { contact, job: await this.card.fill(job._id, contact) };
+        const contact = await this.book.save(fields, job.id);
+        return { contact, job: await this.card.fill(job.id, contact) };
       }
   }

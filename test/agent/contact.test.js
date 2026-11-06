@@ -144,7 +144,7 @@ const contactTaskWith = ({ job = appleJob, fetchPage, exaAnswers = [] } = {}) =>
   {
     const exaFetch = new FakeFetch(exaAnswers);
     const exa = new ExaClient({ apiKey: "k", fetch: exaFetch.fetch });
-    const jobs = { findById: async (id) => (id === "job-1" ? job : null) };
+    const jobs = { find: async (id) => (id === "job-1" ? job : null) };
     return { exaFetch, task: new ContactTask({ jobs, exa, fetchPage }) };
   };
 

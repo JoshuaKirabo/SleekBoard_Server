@@ -14,7 +14,7 @@ const deskWith = (run) =>
         find: async (id) => (id === run?.id ? run : null),
         decide: async (id, index, decision) => decided.push({ id, index, decision }),
       };
-    const jobs = { findById: async (id) => (id === "job-1" ? { _id: "job-1", company: "Apple" } : null) };
+    const jobs = { find: async (id) => (id === "job-1" ? { id: "job-1", company: "Apple" } : null) };
     const book = { save: async (fields, jobId) => (saved.push({ fields, jobId }), { id: "contact-1", ...fields }) };
     const card = { fill: async (jobId) => ({ id: jobId, contact: "Sam Rivera" }) };
     return { desk: new SuggestionDesk({ runs, jobs, book, card }), saved, decided };

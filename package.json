@@ -8,11 +8,11 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "NODE_ENV=development node --watch src/server.js",
-    "seed": "node src/scripts/seed.js",
     "test": "node --test \"test/**/*.test.js\"",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:copy": "node src/scripts/copyFromMongo.js"
+    "db:copy": "node src/scripts/copyFromMongo.js",
+    "test:db": "node --env-file=.env --test \"test/**/*.pg.test.js\""
   },
   "license": "ISC",
   "dependencies": {

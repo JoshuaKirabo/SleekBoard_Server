@@ -6,7 +6,7 @@ const failure = (status, message) => Object.assign(new Error(message), { status 
 // What a "note" run is: drafting two connection notes to one saved contact about one job. Same rung as the contact
 // finder, DeepSeek V4.1 Flash. It reads at most the posting and writes, so 6 trips is plenty.
 //
-// jobs is anything with findById, and contacts is the ContactBook.
+// jobs is anything with find(id), like the JobStore, and contacts is the ContactBook.
 export class NoteTask
   {
     constructor({ jobs, contacts, fetchPage })
@@ -34,7 +34,7 @@ export class NoteTask
     // The job and the contact are read when the run starts, so edits made while it waited still count.
     async start(run)
       {
-        const job = await this.jobs.findById(run.job);
+        const job = await this.jobs.find(run.job);
         if(!job) throw new Error("That job was deleted before its run started.");
         const contact = await this.contacts.find(run.input?.contact);
         if(!contact) throw new Error("That contact was deleted before its run started.");

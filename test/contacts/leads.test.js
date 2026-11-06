@@ -19,7 +19,7 @@ test("a connection who's already a saved contact only shows once, as the contact
     const book = bookWith({ saved: [{ name: "Ana Lopez" }], atCompany: [{ name: "Ben Ng", match: "strong" }] });
     const connections = connectionsWith([{ name: "ana lopez", company: "Stripe" }, { name: "Ben Ng", company: "Stripe" }, { name: "Cy Ode", company: "Stripe" }]);
     const leads = new WarmLeads({ book, connections, card: null });
-    const answer = await leads.forJob({ _id: "job-1", company: "Stripe Inc." });
+    const answer = await leads.forJob({ id: "job-1", company: "Stripe Inc." });
     assert.deepEqual(answer.saved, [{ name: "Ana Lopez" }]);
     assert.deepEqual(answer.leads.contacts, [{ name: "Ben Ng", match: "strong" }]);
     assert.deepEqual(answer.leads.connections.map((connection) => connection.name), ["Cy Ode"]);

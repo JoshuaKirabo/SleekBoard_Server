@@ -25,7 +25,7 @@ export class SuggestionDesk
         if(!DECISIONS.includes(decision)) throw failure(StatusCodes.BAD_REQUEST, `decision has to be ${DECISIONS.join(" or ")}.`);
         const run = await this.runs.find(runId);
         const suggestion = this.suggestionOf(run, index);
-        const job = await this.jobs.findById(run.job);
+        const job = await this.jobs.find(run.job);
         if(!job) throw failure(StatusCodes.NOT_FOUND, "That run's job was deleted.");
         const saved = decision === "accept" ? await this.accept(suggestion, job) : { contact: null, job };
         await this.runs.decide(run.id, index, decision);
@@ -47,7 +47,7 @@ export class SuggestionDesk
     async accept(suggestion, job)
       {
         const { name, title, type, location, link, quote, reason } = suggestion;
-        const contact = await this.book.save({ name, company: job.company, type, title, location: location === "unknown" ? "" : location, link, quote, reason, source: "run" }, job._id);
-        return { contact, job: await this.card.fill(job._id, contact) };
+        const contact = await this.book.save({ name, company: job.company, type, title, location: location === "unknown" ? "" : location, link, quote, reason, source: "run" }, job.id);
+        return { contact, job: await this.card.fill(job.id, contact) };
       }
   }

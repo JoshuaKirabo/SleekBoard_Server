@@ -1,8 +1,8 @@
 import { StatusCodes } from "http-status-codes";
-import { Job } from "../models/job.model.js";
 import { contactBook, warmLeads } from "../services/contacts/index.js";
+import { jobStore } from "../services/jobs/index.js";
 
-const jobFor = async (id) => Job.findById(id);
+const jobFor = async (id) => jobStore.find(id);
 
 // GET /api/jobs/:id/contacts. Everything the panel's Contacts section shows: who's saved for this job, and the warm
 // leads at its company (people saved for other jobs there, and LinkedIn connections).

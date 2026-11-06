@@ -16,7 +16,7 @@ import { ContactTask } from "./tasks/ContactTask.js";
 import { FillTask } from "./tasks/FillTask.js";
 import { PostingCheck } from "./PostingCheck.js";
 import { NoteTask } from "./tasks/NoteTask.js";
-import { Job } from "../models/job.model.js";
+import { jobStore } from "../services/jobs/index.js";
 import { fetchPage, readJob } from "../services/jobReader.js";
 import { contactBook, jobCard } from "../services/contacts/index.js";
 import { SuggestionDesk } from "../services/contacts/SuggestionDesk.js";
@@ -122,7 +122,7 @@ const replyCheck = new ReplyCheck(
     search: new GmailSearch(),
     reader: new MailMessage(),
     mailbox,
-    jobs: Job,
+    jobs: jobStore,
     sorter: new ReplySorter(),
     match: replyMatch,
     ai: new ReplyAi({ clientFor: () => clientFor(ladder.pick(1, "json")), match: replyMatch }),
@@ -133,8 +133,8 @@ const replyCheck = new ReplyCheck(
 // Every kind of run the server knows, by the kind a run is saved with.
 const tasks = new Map(
   [
-    ["contact", new ContactTask({ jobs: Job, exa, fetchPage, schools })],
-    ["note", new NoteTask({ jobs: Job, contacts: contactBook, fetchPage })],
+    ["contact", new ContactTask({ jobs: jobStore, exa, fetchPage, schools })],
+    ["note", new NoteTask({ jobs: jobStore, contacts: contactBook, fetchPage })],
     ["fill", new FillTask({ readJob, check: postingCheck, exa, fetchPage, store: runStore, schools })],
     ["email", new EmailTask({ check: replyCheck, tokens: gmailTokens })],
   ]);
@@ -143,7 +143,7 @@ const tasks = new Map(
 export const runner = new Runner({ store: runStore, cap, tasks, buildAgent, logFor, runUsd: limits.runUsd });
 
 // Where you say yes or no to a run's suggestions. Built here because it reads runs.
-export const suggestionDesk = new SuggestionDesk({ runs: runStore, jobs: Job, book: contactBook, card: jobCard });
+export const suggestionDesk = new SuggestionDesk({ runs: runStore, jobs: jobStore, book: contactBook, card: jobCard });
 
 // How often the inbox is checked. JobNavigator's is 30 minutes. Ours is a minute, so a card moves soon after the reply
 // lands, and a minute with nothing new is one Gmail call and no run.

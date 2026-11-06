@@ -61,7 +61,7 @@ export class ReplyCheck
     async run({ token, log, budget, signal })
       {
         const { days, found, due, resting, address } = await this.inbox(token, signal);
-        const cards = await this.jobs.find({});
+        const cards = await this.jobs.list();
         const waiting = cards.filter((job) => this.lanes.waiting(job.status));
         const state = { token, log, budget, signal, aiLeft: this.aiPerCheck, aiUsed: 0, waiting, cards, me: address.toLowerCase() };
         const tally = Object.fromEntries(OUTCOMES.map((outcome) => [outcome, 0]));
@@ -225,7 +225,7 @@ export class ReplyCheck
     refresh(state, job)
       {
         if(!job) return;
-        const same = (one) => String(one._id) === String(job._id);
+        const same = (one) => one.id === job.id;
         state.cards = [...state.cards.filter((one) => !same(one)), job];
         const others = state.waiting.filter((one) => !same(one));
         state.waiting = this.lanes.waiting(job.status) ? [...others, job] : others;

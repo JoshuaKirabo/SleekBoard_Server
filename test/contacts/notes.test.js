@@ -49,12 +49,12 @@ test("a note may only say you applied once you have", async () =>
     assert.equal(tool.notes[0].text, claim);
   });
 
-const appleJob = { _id: "job-1", company: "Apple", role: "iOS Engineer Intern", location: "Cupertino, CA", link: "jobs.apple.com/en-us/details/1", status: "saved" };
+const appleJob = { id: "job-1", company: "Apple", role: "iOS Engineer Intern", location: "Cupertino, CA", link: "jobs.apple.com/en-us/details/1", status: "saved" };
 const sam = { _id: "contact-1", name: "Sam Rivera", title: "Technical Recruiter", type: "recruiter", source: "run", jobs: ["job-1"] };
 
 const noteTaskWith = ({ job = appleJob, contact = sam, fetchPage = async () => ({ html: "", url: null }) } = {}) =>
   {
-    const jobs = { findById: async (id) => (id === "job-1" ? job : null) };
+    const jobs = { find: async (id) => (id === "job-1" ? job : null) };
     const contacts = { find: async (id) => (String(id) === "contact-1" ? contact : null) };
     return new NoteTask({ jobs, contacts, fetchPage });
   };

@@ -160,51 +160,69 @@ export class FakeFetch
 // A JSON answer the way Exa sends one.
 export const jsonResponse = (status, body) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-// The Job model's update calls, over plain objects in memory. It understands only the filters and operators the lane
-// history, the reply desk and the email check use: _id, status and moves.$size, then $set, $push and $pop.
-export class MemoryJobs
+// The JobStore, over plain objects in memory. Same promises as the real one: moves and undos only land while the card
+// is still where it was read, and a stale one gives back null.
+export class MemoryJobStore
   {
     constructor(jobs = [])
       {
-        this.jobs = new Map(jobs.map((job) => [job._id, { moves: [], replySuggestion: null, ...structuredClone(job) }]));
+        this.jobs = new Map();
+        for(const job of jobs) this.add(job);
       }
 
-    async findById(id)
+    add(job)
       {
-        const job = this.jobs.get(id);
+        this.jobs.set(job.id, { moves: [], replySuggestion: null, ...structuredClone(job) });
+      }
+
+    async list()
+      {
+        return [...this.jobs.values()].map((job) => structuredClone(job));
+      }
+
+    async find(id)
+      {
+        const job = this.jobs.get(String(id));
         return job ? structuredClone(job) : null;
       }
 
-    // Only { status: { $in: [...] } }, what the email check asks for.
-    async find(filter = {})
-      {
-        const lanes = filter.status?.$in;
-        return [...this.jobs.values()].filter((job) => !lanes || lanes.includes(job.status)).map((job) => structuredClone(job));
-      }
-
-    async findOneAndUpdate(filter, update)
-      {
-        const job = this.jobs.get(filter._id);
-        if(!job || !this.fits(job, filter)) return null;
-        Object.assign(job, update.$set || {});
-        for(const [key, value] of Object.entries(update.$push || {})) job[key].push(value);
-        for(const key of Object.keys(update.$pop || {})) job[key].pop();
-        return structuredClone(job);
-      }
-
-    async findByIdAndUpdate(id, fields)
+    async moveLane(id, from, step, also = {})
       {
         const job = this.jobs.get(id);
-        if(!job) return null;
-        Object.assign(job, fields);
+        if(!job || job.status !== from) return null;
+        Object.assign(job, also, { status: step.to, replySuggestion: null });
+        job.moves.push(step);
         return structuredClone(job);
       }
 
-    fits(job, filter)
+    async undoLane(id, from, back, count)
       {
-        if("status" in filter && job.status !== filter.status) return false;
-        if(filter.moves && job.moves.length !== filter.moves.$size) return false;
-        return true;
+        const job = this.jobs.get(id);
+        const last = job?.moves.at(-1);
+        if(!job || job.status !== from || job.moves.length !== count || last?.from !== back || last?.to !== from) return null;
+        job.moves.pop();
+        Object.assign(job, { status: back, replySuggestion: null });
+        return structuredClone(job);
+      }
+
+    async fillBlank(id, field, value)
+      {
+        const job = this.jobs.get(String(id));
+        if(job && !job[field]) job[field] = value;
+      }
+
+    async noteReply(id, reply, suggestion)
+      {
+        const job = this.jobs.get(String(id));
+        if(!job) return null;
+        Object.assign(job, reply);
+        if(suggestion !== undefined) job.replySuggestion = suggestion;
+        return structuredClone(job);
+      }
+
+    async clearSuggestion(id)
+      {
+        return this.noteReply(id, {}, null);
       }
 
     // Moves a card behind the code's back, like a drag landing in between a read and a write.

@@ -9,9 +9,9 @@
 
 export class LaneHistory
   {
-    constructor({ Job })
+    constructor({ jobs })
       {
-        this.Job = Job;
+        this.jobs = jobs;
       }
 
     // Moves the card to lane `to` and adds the move to its history. `also` is anything else to save in the same write.
@@ -21,10 +21,7 @@ export class LaneHistory
       {
         if(job.status === to) return job;
         const step = { from: job.status, to, at: new Date(), source };
-        return this.Job.findOneAndUpdate(
-          { _id: job._id, status: job.status },
-          { $set: { status: to, replySuggestion: null, ...also }, $push: { moves: step } },
-          { new: true, runValidators: true });
+        return this.jobs.moveLane(job.id, job.status, step, also);
       }
 
     // The toast's Undo: puts the card back in `back` and takes the move off its history, so it never happened. Only when
@@ -34,9 +31,6 @@ export class LaneHistory
         const moves = job.moves || [];
         const last = moves.at(-1);
         if(!last || last.to !== job.status || last.from !== back) return this.move(job, back, "board");
-        return this.Job.findOneAndUpdate(
-          { _id: job._id, status: job.status, moves: { $size: moves.length } },
-          { $set: { status: back, replySuggestion: null }, $pop: { moves: 1 } },
-          { new: true, runValidators: true });
+        return this.jobs.undoLane(job.id, job.status, back, moves.length);
       }
   }

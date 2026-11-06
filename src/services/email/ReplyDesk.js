@@ -15,9 +15,9 @@ const SNIPPET = 200;
 // https://github.com/vesaias/JobNavigator/blob/main/backend/email_monitor/gmail_client.py
 export class ReplyDesk
   {
-    constructor({ Job, history, lanes })
+    constructor({ jobs, history, lanes })
       {
-        this.Job = Job;
+        this.jobs = jobs;
         this.history = history;
         this.lanes = lanes;
       }
@@ -44,14 +44,13 @@ export class ReplyDesk
     // Keeps the reply on the card without moving it, like a "can you do Tuesday?" on a card already in Interviewing.
     note(job, email)
       {
-        return this.Job.findByIdAndUpdate(job._id, this.replyOf(email), { new: true });
+        return this.jobs.noteReply(job.id, this.replyOf(email));
       }
 
     // Leaves the AI's guess on the card for you to answer, with the reply it came from.
     suggest(job, lane, confidence, email)
       {
-        const replySuggestion = { to: lane, confidence, at: new Date() };
-        return this.Job.findByIdAndUpdate(job._id, { ...this.replyOf(email), replySuggestion }, { new: true, runValidators: true });
+        return this.jobs.noteReply(job.id, this.replyOf(email), { to: lane, confidence, at: new Date() });
       }
 
     // Your answer to a suggestion. Accept moves the card as an email move, so Undo works on it like any other. Dismiss
@@ -59,7 +58,7 @@ export class ReplyDesk
     async decide(jobId, decision)
       {
         if(!DECISIONS.includes(decision)) throw failure(StatusCodes.BAD_REQUEST, `decision has to be ${DECISIONS.join(" or ")}.`);
-        const job = await this.Job.findById(jobId);
+        const job = await this.jobs.find(jobId);
         if(!job) throw failure(StatusCodes.NOT_FOUND, "That job doesn't exist.");
         if(!job.replySuggestion) throw failure(StatusCodes.CONFLICT, "That card has no suggestion to answer.");
         if(decision === "dismiss") return this.clear(job);
@@ -82,6 +81,6 @@ export class ReplyDesk
 
     clear(job)
       {
-        return this.Job.findByIdAndUpdate(job._id, { replySuggestion: null }, { new: true });
+        return this.jobs.clearSuggestion(job.id);
       }
   }

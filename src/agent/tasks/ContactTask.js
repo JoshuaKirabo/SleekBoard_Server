@@ -4,7 +4,7 @@ import { ContactRun } from "./ContactRun.js";
 // it gets, and how to start one. It starts on rung 2, DeepSeek V4.1 Flash, the roadmap's pick for the contact agent
 // until a bake-off says otherwise.
 //
-// jobs is anything with findById, the Job model in the real server and a stand-in in tests.
+// jobs is anything with find(id): the JobStore in the real server and a stand-in in tests.
 export class ContactTask
   {
     // schools are the user's schools, for alumni. A run looks for about five people with 5 searches, so it gets more
@@ -24,7 +24,7 @@ export class ContactTask
     // The job is read when the run starts, not when it's queued, so an edit made while it waited still counts.
     async start(run)
       {
-        const job = await this.jobs.findById(run.job);
+        const job = await this.jobs.find(run.job);
         if(!job) throw new Error("That job was deleted before its run started.");
         return new ContactRun({ job, exa: this.exa, fetchPage: this.fetchPage, schools: this.schools });
       }

@@ -3,17 +3,17 @@
 // yourself stays.
 export class JobCard
   {
-    constructor({ Job })
+    constructor({ jobs })
       {
-        this.Job = Job;
+        this.jobs = jobs;
       }
 
     // Each field only lands while it's still empty, checked in the same write, so a name you type at the same moment
     // isn't overwritten.
     async fill(jobId, contact)
       {
-        await this.Job.updateOne({ _id: jobId, contact: "" }, { contact: contact.name.slice(0, 120) });
-        if(contact.email) await this.Job.updateOne({ _id: jobId, email: "" }, { email: contact.email.slice(0, 200) });
-        return this.Job.findById(jobId);
+        await this.jobs.fillBlank(jobId, "contact", contact.name.slice(0, 120));
+        if(contact.email) await this.jobs.fillBlank(jobId, "email", contact.email.slice(0, 200));
+        return this.jobs.find(jobId);
       }
   }

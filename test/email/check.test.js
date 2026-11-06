@@ -8,17 +8,17 @@ import { ReplyDesk } from "../../src/services/email/ReplyDesk.js";
 import { LaneMove } from "../../src/services/email/LaneMove.js";
 import { GmailSearch } from "../../src/services/email/GmailSearch.js";
 import { LaneHistory } from "../../src/services/jobs/LaneHistory.js";
-import { MemoryJobs, MemoryLog, ScriptedAi } from "../fakes.js";
+import { MemoryJobStore, MemoryLog, ScriptedAi } from "../fakes.js";
 
 // The whole check with a stand-in Gmail and mailbox. The sorting, matching, lanes and desk are the real ones, and the
 // AI answers from a script.
 
 const CARDS =
   [
-    { _id: "stripe", company: "Stripe", role: "SWE", status: "applied" },
-    { _id: "kpler", company: "Kpler", role: "Data Analyst", status: "ghosted" },
-    { _id: "datadog", company: "Datadog", role: "SWE Intern", status: "interviewing" },
-    { _id: "figma", company: "Figma", role: "Designer", status: "saved" },
+    { id: "stripe", company: "Stripe", role: "SWE", status: "applied" },
+    { id: "kpler", company: "Kpler", role: "Data Analyst", status: "ghosted" },
+    { id: "datadog", company: "Datadog", role: "SWE Intern", status: "interviewing" },
+    { id: "figma", company: "Figma", role: "Designer", status: "saved" },
   ];
 
 const mail =
@@ -36,7 +36,7 @@ const answer = (fields) => ({ role: "assistant", content: JSON.stringify({ match
 
 const setup = ({ inbox, processed = [], caughtUp = false, ai = [], fail = [], cards = CARDS, address = "" } = {}) =>
   {
-    const Job = new MemoryJobs(cards);
+    const jobs = new MemoryJobStore(cards);
     const clock = { now: 1_000_000_000 };
     const box = { processed: [...processed], resting: [], caughtUp, checks: [], address };
     const queries = [];
@@ -70,26 +70,26 @@ const setup = ({ inbox, processed = [], caughtUp = false, ai = [], fail = [], ca
         search: new GmailSearch(),
         reader: { read: (message) => message },
         mailbox,
-        jobs: Job,
+        jobs,
         sorter: new ReplySorter(),
         match,
         ai: new ReplyAi({ clientFor: () => model, match }),
         lanes,
-        desk: new ReplyDesk({ Job, history: new LaneHistory({ Job }), lanes }),
+        desk: new ReplyDesk({ jobs, history: new LaneHistory({ jobs }), lanes }),
         sleep: async (ms) => gaps.push(ms),
         now: () => clock.now,
       });
     const log = new MemoryLog();
-    return { check, Job, box, clock, queries, model, gaps, log, go: () => check.run({ token: "tok", log }) };
+    return { check, jobs, box, clock, queries, model, gaps, log, go: () => check.run({ token: "tok", log }) };
   };
 
 test("sure replies move their cards, as email moves, with the reply kept", async () =>
   {
-    const { Job, box, log, go } = setup({ inbox: { m1: mail.stripeNo, m2: mail.kplerYes } });
+    const { jobs, box, log, go } = setup({ inbox: { m1: mail.stripeNo, m2: mail.kplerYes } });
     const result = await go();
     assert.equal(result.moved, 2);
-    assert.equal((await Job.findById("stripe")).status, "rejected");
-    const kpler = await Job.findById("kpler");
+    assert.equal((await jobs.find("stripe")).status, "rejected");
+    const kpler = await jobs.find("kpler");
     assert.equal(kpler.status, "interviewing");
     assert.equal(kpler.moves[0].source, "email");
     assert.match(kpler.replySnippet, /schedule an interview/);
@@ -100,32 +100,32 @@ test("sure replies move their cards, as email moves, with the reply kept", async
 
 test("a positive reply on a card already in Interviewing is kept, not moved", async () =>
   {
-    const { Job, go } = setup({ inbox: { m1: mail.datadogYes } });
+    const { jobs, go } = setup({ inbox: { m1: mail.datadogYes } });
     assert.equal((await go()).noted, 1);
-    const datadog = await Job.findById("datadog");
+    const datadog = await jobs.find("datadog");
     assert.equal(datadog.status, "interviewing");
     assert.match(datadog.replySnippet, /schedule a call/);
   });
 
 test("an auto-reply is handled and moves nothing", async () =>
   {
-    const { Job, box, go } = setup({ inbox: { m1: mail.thanks } });
+    const { jobs, box, go } = setup({ inbox: { m1: mail.thanks } });
     assert.equal((await go()).ignored, 1);
-    assert.equal((await Job.findById("stripe")).status, "applied");
+    assert.equal((await jobs.find("stripe")).status, "applied");
     assert.deepEqual(box.processed, ["m1"]);
   });
 
 test("a sure reply with no card rests, then lands once the card exists", async () =>
   {
-    const { Job, box, clock, go } = setup({ inbox: { m1: mail.nobodyNo } });
+    const { jobs, box, clock, go } = setup({ inbox: { m1: mail.nobodyNo } });
     assert.equal((await go()).left, 1);
     assert.deepEqual(box.processed, []);
     assert.deepEqual(box.resting.map((one) => one.id), ["m1"]);
-    Job.jobs.set("acme", { _id: "acme", company: "Acme", role: "PM", status: "applied", moves: [], replySuggestion: null });
+    jobs.add({ id: "acme", company: "Acme", role: "PM", status: "applied", moves: [], replySuggestion: null });
     assert.equal((await go()).resting, 1);
     clock.now += 10 * 60_000 + 1;
     assert.equal((await go()).moved, 1);
-    assert.equal((await Job.findById("acme")).status, "rejected");
+    assert.equal((await jobs.find("acme")).status, "rejected");
     assert.deepEqual(box.resting, []);
     assert.deepEqual(box.processed, ["m1"]);
   });
@@ -139,9 +139,9 @@ test("a reply with no card doesn't hold up the first look", async () =>
 
 test("a reply for a card that isn't waiting keeps the reply and is handled, not retried", async () =>
   {
-    const { Job, box, go } = setup({ inbox: { m1: mail.figmaYes } });
+    const { jobs, box, go } = setup({ inbox: { m1: mail.figmaYes } });
     assert.equal((await go()).noted, 1);
-    const figma = await Job.findById("figma");
+    const figma = await jobs.find("figma");
     assert.equal(figma.status, "saved");
     assert.match(figma.replySnippet, /schedule an interview/);
     assert.deepEqual(box.processed, ["m1"]);
@@ -150,9 +150,9 @@ test("a reply for a card that isn't waiting keeps the reply and is handled, not 
 
 test("replies already handled aren't read again", async () =>
   {
-    const { Job, go } = setup({ inbox: { m1: mail.stripeNo }, processed: ["m1"] });
+    const { jobs, go } = setup({ inbox: { m1: mail.stripeNo }, processed: ["m1"] });
     assert.equal((await go()).found, 1);
-    assert.equal((await Job.findById("stripe")).status, "applied");
+    assert.equal((await jobs.find("stripe")).status, "applied");
   });
 
 test("the first check reads 90 days, and once it's caught up the next reads 3", async () =>
@@ -177,17 +177,17 @@ test("a check that runs out of AI reads stays on the 90-day look", async () =>
 
 test("an unclear reply the AI is sure about moves the card", async () =>
   {
-    const { Job, model, go } = setup({ inbox: { m1: mail.stripeVague }, ai: [answer({ match_index: 1, status: "interview", confidence: 92 })] });
+    const { jobs, model, go } = setup({ inbox: { m1: mail.stripeVague }, ai: [answer({ match_index: 1, status: "interview", confidence: 92 })] });
     assert.equal((await go()).moved, 1);
-    assert.equal((await Job.findById("stripe")).status, "interviewing");
+    assert.equal((await jobs.find("stripe")).status, "interviewing");
     assert.match(model.calls[0].messages[1].content, /1\. Stripe — SWE \(applied since unknown\)/);
   });
 
 test("an unclear reply the AI isn't sure about becomes a suggestion", async () =>
   {
-    const { Job, log, go } = setup({ inbox: { m1: mail.stripeVague }, ai: [answer({ match_index: 1, status: "interview", confidence: 55 })] });
+    const { jobs, log, go } = setup({ inbox: { m1: mail.stripeVague }, ai: [answer({ match_index: 1, status: "interview", confidence: 55 })] });
     assert.equal((await go()).suggested, 1);
-    const stripe = await Job.findById("stripe");
+    const stripe = await jobs.find("stripe");
     assert.equal(stripe.status, "applied");
     assert.deepEqual({ to: stripe.replySuggestion.to, confidence: stripe.replySuggestion.confidence }, { to: "interviewing", confidence: 55 });
     assert.ok(log.steps.some((step) => step.text === "Suggested moving Stripe to Interviewing."));
@@ -195,18 +195,18 @@ test("an unclear reply the AI isn't sure about becomes a suggestion", async () =
 
 test("the AI picking a card the sender doesn't match moves and suggests nothing", async () =>
   {
-    const { Job, go } = setup({ inbox: { m1: mail.stripeVague }, ai: [answer({ match_index: 2, status: "rejected", confidence: 99 })] });
+    const { jobs, go } = setup({ inbox: { m1: mail.stripeVague }, ai: [answer({ match_index: 2, status: "rejected", confidence: 99 })] });
     assert.equal((await go()).ignored, 1);
-    const kpler = await Job.findById("kpler");
+    const kpler = await jobs.find("kpler");
     assert.equal(kpler.status, "ghosted");
     assert.equal(kpler.replySuggestion, null);
   });
 
 test("a suggestion that wouldn't be a step forward is dropped", async () =>
   {
-    const { Job, go } = setup({ inbox: { m1: mail.stripeVague }, cards: [{ _id: "stripe", company: "Stripe", role: "SWE", status: "interviewing" }], ai: [answer({ match_index: 1, status: "interview", confidence: 50 })] });
+    const { jobs, go } = setup({ inbox: { m1: mail.stripeVague }, cards: [{ id: "stripe", company: "Stripe", role: "SWE", status: "interviewing" }], ai: [answer({ match_index: 1, status: "interview", confidence: 50 })] });
     assert.equal((await go()).ignored, 1);
-    assert.equal((await Job.findById("stripe")).replySuggestion, null);
+    assert.equal((await jobs.find("stripe")).replySuggestion, null);
   });
 
 test("a failed AI read rests and is tried again, instead of lost", async () =>
@@ -244,11 +244,11 @@ test("a message Gmail won't open waits for the next check, without resting", asy
 test("a card moved by one reply isn't moved again by the next", async () =>
   {
     const second = { ...mail.stripeNo, subject: "Following up on your application" };
-    const { Job, go } = setup({ inbox: { m1: mail.stripeNo, m2: second } });
+    const { jobs, go } = setup({ inbox: { m1: mail.stripeNo, m2: second } });
     const result = await go();
     assert.equal(result.moved, 1);
     assert.equal(result.noted, 1);
-    assert.equal((await Job.findById("stripe")).moves.length, 1);
+    assert.equal((await jobs.find("stripe")).moves.length, 1);
   });
 
 test("a stopped run stops the check, and what it handled stays handled", async () =>
@@ -278,29 +278,29 @@ test("hasNew is true only while a reply is due", async () =>
 test("mail you sent never moves a card", async () =>
   {
     const sent = { from: "Joshua Kirabo <JoshuaK2001@gmail.com>", subject: "Stripe SWE role, referral?", body: "Would you have availability for a quick call? Happy to schedule a call." };
-    const { Job, go } = setup({ inbox: { m1: sent }, address: "joshuak2001@gmail.com" });
+    const { jobs, go } = setup({ inbox: { m1: sent }, address: "joshuak2001@gmail.com" });
     assert.equal((await go()).ignored, 1);
-    assert.equal((await Job.findById("stripe")).status, "applied");
+    assert.equal((await jobs.find("stripe")).status, "applied");
   });
 
 test("with two roles at one company, the reply lands on the role it names", async () =>
   {
-    const cards = [{ _id: "figma-swe", company: "Figma", role: "Software Engineer", status: "applied" }, { _id: "figma-pm", company: "Figma", role: "Product Manager", status: "applied" }];
+    const cards = [{ id: "figma-swe", company: "Figma", role: "Software Engineer", status: "applied" }, { id: "figma-pm", company: "Figma", role: "Product Manager", status: "applied" }];
     const no = { from: "Figma <no-reply@figma.com>", subject: "Your application for Product Manager", body: "Unfortunately, we have decided not to move forward." };
-    const { Job, go } = setup({ inbox: { m1: no }, cards });
+    const { jobs, go } = setup({ inbox: { m1: no }, cards });
     assert.equal((await go()).moved, 1);
-    assert.equal((await Job.findById("figma-pm")).status, "rejected");
-    assert.equal((await Job.findById("figma-swe")).status, "applied");
+    assert.equal((await jobs.find("figma-pm")).status, "rejected");
+    assert.equal((await jobs.find("figma-swe")).status, "applied");
   });
 
 test("with two roles and neither named, the AI picks instead of a guess", async () =>
   {
-    const cards = [{ _id: "figma-swe", company: "Figma", role: "Software Engineer", status: "applied" }, { _id: "figma-pm", company: "Figma", role: "Product Manager", status: "applied" }];
+    const cards = [{ id: "figma-swe", company: "Figma", role: "Software Engineer", status: "applied" }, { id: "figma-pm", company: "Figma", role: "Product Manager", status: "applied" }];
     const no = { from: "Figma <no-reply@figma.com>", subject: "Your application", body: "Unfortunately, we have decided not to move forward." };
-    const { Job, model, go } = setup({ inbox: { m1: no }, cards, ai: [answer({ match_index: 2, status: "rejected", confidence: 90 })] });
+    const { jobs, model, go } = setup({ inbox: { m1: no }, cards, ai: [answer({ match_index: 2, status: "rejected", confidence: 90 })] });
     assert.equal((await go()).moved, 1);
     assert.equal(model.calls.length, 1);
     assert.match(model.calls[0].messages[1].content, /1\. Figma — Software Engineer.*\n2\. Figma — Product Manager/s);
-    assert.equal((await Job.findById("figma-pm")).status, "rejected");
-    assert.equal((await Job.findById("figma-swe")).status, "applied");
+    assert.equal((await jobs.find("figma-pm")).status, "rejected");
+    assert.equal((await jobs.find("figma-swe")).status, "applied");
   });
