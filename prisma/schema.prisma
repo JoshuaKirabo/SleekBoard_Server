@@ -38,8 +38,40 @@ model User {
   connections Connection[]
   runs        Run[]
   mailboxes   Mailbox[]
+  logins      FederatedCredential[]
 
   @@map("users")
+}
+
+// A Google (later GitHub, Facebook) account someone signs in with. Matched on the provider's own account id
+// (subject), never on email, since an email can change hands. Same table as passport/todos-express-google's
+// federated_credentials, plus an owner link that deletes the login with its user.
+model FederatedCredential {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  // Who vouches for the account, e.g. https://accounts.google.com.
+  provider  String   @db.VarChar(200)
+  // The provider's id for the account. Google's is a number that never changes, even if the email does.
+  subject   String   @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, subject])
+  @@index([userId])
+  @@map("federated_credentials")
+}
+
+// Who is signed in on each browser. connect-pg-simple reads and writes it (its own table.sql, named sessions here),
+// so the columns match that file exactly. A session outlives a server restart or a deploy, and signing out deletes
+// its row.
+model Session {
+  sid    String   @id @db.VarChar
+  sess   Json     @db.Json
+  expire DateTime @db.Timestamp(6)
+
+  @@index([expire])
+  @@map("sessions")
 }
 
 // ---------------------------------------------------------------------------------------------------------------
