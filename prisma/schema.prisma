@@ -1,0 +1,330 @@
+// SleekBoard's tables in Postgres. Replaces the Mongoose models in src/models one at a time (see PROJECT_NOTES.md,
+// "Postgres instead of Mongo"). Prisma won't parse own-line braces, so this file keeps Prisma's layout.
+//
+// Tables and columns are snake_case in Postgres and camelCase in code. Lists that lived inside a Mongo record (a
+// job's moves, a contact's jobs, a run's steps) are their own tables now, so the database keeps the links right.
+//
+// After changing this file: npm run db:migrate
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Jobs
+// ---------------------------------------------------------------------------------------------------------------
+
+// The six lanes, same ids as the client's statuses.js. A job outside them is a typo, not a new lane.
+enum Lane {
+  saved
+  applied
+  interviewing
+  offer
+  rejected
+  ghosted
+
+  @@map("lane")
+}
+
+// What moved a card: you on the board, or a reply in your inbox.
+enum MoveSource {
+  board
+  email
+
+  @@map("move_source")
+}
+
+model Job {
+  id           String @id @default(uuid())
+  company      String @db.VarChar(120)
+  role         String @db.VarChar(200)
+  location     String @default("") @db.VarChar(120)
+  status       Lane   @default(saved)
+  // "YYYY-MM-DD" or empty, the same as the date inputs give us. A Postgres date would come back as a JS Date and
+  // get shifted by time zones.
+  applied      String @default("") @db.VarChar(10)
+  deadline     String @default("") @db.VarChar(10)
+  link         String @default("") @db.VarChar(2000)
+  contact      String @default("") @db.VarChar(120)
+  email        String @default("") @db.VarChar(200)
+  notes        String @default("") @db.VarChar(5000)
+  // A favicon URL, or a data URL when you uploaded one (shrunk to 128px on the client).
+  logo         String @default("") @db.VarChar(200000)
+  // The last reply tied to this card: when it was read and its first 200 characters.
+  replyAt      DateTime? @map("reply_at")
+  replySnippet String    @default("") @map("reply_snippet") @db.VarChar(200)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  moves           JobMove[]
+  replySuggestion ReplySuggestion?
+  contacts        ContactJob[]
+  runs            Run[]
+
+  @@map("jobs")
+}
+
+// One lane change, JobNavigator's status_transitions entry. Oldest first by id. Undo deletes the last one, so a
+// misclick and its undo leave no trace.
+model JobMove {
+  id     Int        @id @default(autoincrement())
+  jobId  String     @map("job_id")
+  from   Lane?
+  to     Lane?
+  at     DateTime   @default(now())
+  source MoveSource
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, id])
+  @@map("job_moves")
+}
+
+// A reply the AI wasn't sure enough about to act on: the lane it thinks the card belongs in, waiting for you to say
+// yes or no. At most one per job.
+model ReplySuggestion {
+  jobId      String   @id @map("job_id")
+  to         Lane
+  confidence Float?
+  at         DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@map("reply_suggestions")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Contacts and LinkedIn connections
+// ---------------------------------------------------------------------------------------------------------------
+
+// career-ops' contact types. The contact finder suggests the first three.
+enum ContactKind {
+  hiring_manager
+  recruiter
+  alumni
+  peer
+  interviewer
+  internal_referral
+  other
+
+  @@map("contact_kind")
+}
+
+// Where a saved contact came from: a contact-finder run you accepted, or your LinkedIn connections.
+enum ContactSource {
+  run
+  linkedin
+
+  @@map("contact_source")
+}
+
+// The people you've said yes to. One per person per company: key is both, folded (see TextKey), so saving Sam at
+// Apple again updates Sam instead of adding a second Sam.
+model Contact {
+  id           String        @id @default(uuid())
+  key          String        @unique
+  name         String        @db.VarChar(200)
+  company      String        @db.VarChar(120)
+  // The company folded, and its distinctive words, for the warm-lead lookup (see CompanyMatch).
+  companyKey   String        @map("company_key")
+  companyWords String[]      @map("company_words")
+  type         ContactKind   @default(other)
+  title        String        @default("") @db.VarChar(200)
+  location     String        @default("") @db.VarChar(200)
+  email        String        @default("") @db.VarChar(200)
+  // Their LinkedIn profile, or whatever page proved who they are.
+  link         String        @default("") @db.VarChar(2000)
+  // The words from that page the finder checked, and why it picked them.
+  quote        String        @default("") @db.VarChar(300)
+  reason       String        @default("") @db.VarChar(300)
+  source       ContactSource @default(run)
+  // When you connected on LinkedIn, "YYYY-MM-DD", for people from your connections.
+  connectedOn  String        @default("") @map("connected_on") @db.VarChar(10)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  jobs     ContactJob[]
+  noteRuns Run[]
+
+  @@index([companyKey])
+  @@index([companyWords], type: Gin)
+  @@map("contacts")
+}
+
+// Which jobs a contact is saved for. Deleting a job takes it off its contacts; the people stay, for warm leads later.
+model ContactJob {
+  contactId String @map("contact_id")
+  jobId     String @map("job_id")
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  job     Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, jobId])
+  @@index([jobId])
+  @@map("contact_jobs")
+}
+
+// Your LinkedIn connections, from the Connections.csv you upload. Each upload replaces the whole list. They stay out
+// of your saved contacts until you pick one for a job.
+model Connection {
+  id                String   @id @default(uuid())
+  name              String   @db.VarChar(200)
+  company           String   @db.VarChar(200)
+  title             String   @default("") @db.VarChar(300)
+  linkedin          String   @default("") @db.VarChar(2000)
+  email             String   @default("") @db.VarChar(200)
+  connectedOn       String   @default("") @map("connected_on") @db.VarChar(10)
+  // The company split into folded words (CompanyMatch.tokensOf), worked out once on upload instead of on every
+  // lookup.
+  tokensAll         String[] @map("tokens_all")
+  tokensDistinctive String[] @map("tokens_distinctive")
+  tokensKey         String?  @map("tokens_key")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([tokensKey])
+  @@index([tokensDistinctive], type: Gin)
+  @@map("connections")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Agent runs
+// ---------------------------------------------------------------------------------------------------------------
+
+// contact: who to contact about a job. note: drafting notes to one of them. fill: Fill in, which reads a link before
+// its job exists. email: the inbox check.
+enum RunKind {
+  contact
+  note
+  fill
+  email
+
+  @@map("run_kind")
+}
+
+// queued: waiting for a free slot. running: the agent's on it. done and failed are the two ways it ends.
+enum RunStatus {
+  queued
+  running
+  done
+  failed
+
+  @@map("run_status")
+}
+
+// message: something the model said on its way to a tool. tool: a tool it called. error: a tool that broke.
+enum StepType {
+  message
+  tool
+  error
+
+  @@map("step_type")
+}
+
+model Run {
+  id             String    @id @default(uuid())
+  // Fill and email runs can have no job. Deleting a job keeps its runs, with the job emptied, so today's spending
+  // still counts toward the cap.
+  jobId          String?   @map("job_id")
+  kind           RunKind
+  status         RunStatus @default(queued)
+  // The total of usage, kept alongside it so the spending cap can add up a day without opening every run.
+  cost           Float     @default(0)
+  // The most this run may spend. The cap counts it in full until the run ends.
+  budget         Float     @default(0)
+  // What the run was asked to work on beyond its job: a note run's contact, a fill run's link.
+  inputContactId String?   @map("input_contact_id")
+  inputLink      String?   @map("input_link") @db.VarChar(2000)
+  result         Json?
+  error          String    @default("")
+  startedAt      DateTime? @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  job          Job?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  inputContact Contact?   @relation(fields: [inputContactId], references: [id], onDelete: SetNull)
+  steps        RunStep[]
+  usage        RunUsage[]
+
+  @@index([jobId])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("runs")
+}
+
+// The live step log, oldest first by id.
+model RunStep {
+  id    Int      @id @default(autoincrement())
+  runId String   @map("run_id")
+  type  StepType
+  text  String   @default("") @db.VarChar(1000)
+  at    DateTime @default(now())
+
+  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, id])
+  @@map("run_steps")
+}
+
+// One entry per paid trip. A trip to a model fills in model and its tokens; a paid tool, like web_search, fills in
+// tool instead.
+model RunUsage {
+  id     Int    @id @default(autoincrement())
+  runId  String @map("run_id")
+  model  String @default("")
+  tool   String @default("")
+  input  Int    @default(0)
+  output Int    @default(0)
+  cost   Float  @default(0)
+
+  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, id])
+  @@map("run_usage")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Gmail
+// ---------------------------------------------------------------------------------------------------------------
+
+// One connected inbox, its Gmail login, and what the email check remembers about it. "me" until there are accounts.
+model Mailbox {
+  id          String    @id @default(uuid())
+  key         String    @unique
+  // The last 500 message ids already handled, oldest first, so nothing is read twice.
+  processed   String[]
+  // False until the first check has read back 90 days. After that a check reads 3.
+  caughtUp    Boolean   @default(false) @map("caught_up")
+  checkedAt   DateTime? @map("checked_at")
+  // The Gmail login, locked with GMAIL_SECRET (GmailKeys). Empty until you connect.
+  login       String    @default("")
+  // Which Gmail address it is, shown next to the Disconnect button.
+  address     String    @default("")
+  connectedAt DateTime? @map("connected_at")
+  // The fingerprint of a login Google has refused for good. While it matches, nothing calls Google.
+  expired     String    @default("")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  resting MailboxResting[]
+
+  @@map("mailboxes")
+}
+
+// A reply that couldn't be handled yet (no card for it, or the AI couldn't read it), and when it was last tried.
+model MailboxResting {
+  mailboxId String   @map("mailbox_id")
+  messageId String   @map("message_id")
+  at        DateTime @default(now())
+
+  mailbox Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@id([mailboxId, messageId])
+  @@map("mailbox_resting")
+}

@@ -3,3 +3,6 @@ node_modules
 .env.local
 .DS_Store
 npm-debug.log*
+
+# Prisma writes its client here from prisma/schema.prisma (npm run db:generate).
+/generated
