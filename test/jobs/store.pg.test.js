@@ -5,7 +5,6 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../generated/prisma/client.ts";
 import { JobStore } from "../../src/services/jobs/JobStore.js";
 import { LaneHistory } from "../../src/services/jobs/LaneHistory.js";
-import { Owner } from "../../src/services/users/Owner.js";
 
 // The real JobStore against a real Postgres: a separate test database, never the one you use. Skipped unless
 // TEST_DATABASE_URL is set, so `npm test` still runs with no database. `npm run test:db` runs these.
@@ -182,12 +181,4 @@ test("deleting a job keeps its runs, with the job emptied, and drops its contact
     assert.equal(kept.cost, 0.02);
     assert.equal(await db.contactJob.count({ where: { jobId: job.id } }), 0);
     assert.ok(await db.contact.findUnique({ where: { id: contact.id } }));
-  });
-
-test("the owner is found by email, any case, and a missing one says how to fix it", { skip }, async () =>
-  {
-    const { user } = await person();
-    assert.equal(await new Owner({ db, email: user.email.toUpperCase() }).id(), user.id);
-    await assert.rejects(new Owner({ db, email: "nobody@example.com" }).id(), /npm run db:copy -- --owner nobody@example.com/);
-    await assert.rejects(new Owner({ db, email: "" }).id(), /OWNER_EMAIL is missing/);
   });

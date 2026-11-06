@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import routes from "./routes/index.js";
+import { authSettings, sessionMiddleware, passport } from "./services/auth/index.js";
 import { notFound } from "./middleware/notFound.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 
@@ -31,6 +32,12 @@ app.use(cors({ origin: allowedOrigins.length ? allowedOrigins : true, credential
 app.use("/api/connections", express.json({ limit: "8mb" }));
 app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: true }));
+
+// On Cloud Run, Google's proxy talks https to the browser and plain http to us. Trusting one hop lets the session see
+// the real https, so its secure cookie gets set.
+if(authSettings.isBehindProxy()) app.set("trust proxy", 1);
+// Who's signed in: the session from the cookie, then passport turns its user id into req.user.
+app.use("/api", sessionMiddleware, passport.authenticate("session"));
 
 app.use("/api", routes);
 

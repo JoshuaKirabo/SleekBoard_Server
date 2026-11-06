@@ -14,11 +14,18 @@ const ADMIT_MS = 10_000;
 // that's gone wrong, like one resending long pages for 12 steps (about 10 cents on rung 2, 47 on rung 3).
 export const RUN_USD = 0.1;
 
+// For a runner with no users: nobody's current, and work runs as it is.
+const ANYONE = { current: () => null, as: (userId, work) => work() };
+
 // Runs agents in the background. Pressing Run gets a reply straight away, and the work carries on here, two at a time
 // so 80 jobs can't all fire at once and choke the database.
 //
 // Everything it uses gets handed in: tasks says what each kind of run does, buildAgent makes an agent for a task, and
 // logFor makes one run's log. Tests swap all three for fakes.
+//
+// Each run works as whoever started it (people, a CurrentUser). The line is shared, so a queued run can be launched by
+// someone else's run finishing; carrying the user on the run keeps it from picking up theirs. Tests that don't care
+// about users leave people out.
 //
 // A task's start(run, { log, signal, budget }) gives back that run's work: brief() for the agent, tools() it may use, built fresh for the run,
 // and result(answer), which turns the agent's final answer into what the run saves. A task that needs more than the
@@ -27,9 +34,10 @@ export const RUN_USD = 0.1;
 // email check, gets no agent: perform() does the work and gives back what the run saves.
 export class Runner
   {
-    constructor({ store, cap, tasks, buildAgent, logFor, slots = 2, runMs = RUN_MS, admitMs = ADMIT_MS, runUsd = RUN_USD })
+    constructor({ store, cap, tasks, buildAgent, logFor, people = ANYONE, slots = 2, runMs = RUN_MS, admitMs = ADMIT_MS, runUsd = RUN_USD })
       {
         this.store = store;
+        this.people = people;
         this.cap = cap;
         this.tasks = tasks;
         this.buildAgent = buildAgent;
@@ -49,7 +57,7 @@ export class Runner
         const task = this.taskFor(kind);
         const kept = await this.inputFor(task, input, jobId);
         const run = await this.lock.hold(() => new Deadline(this.admitMs, "Starting a run").race(this.admit({ kind, job: jobId, budget: this.budgetFor(task), input: kept })));
-        this.enqueue({ run, task });
+        this.enqueue({ run, task, userId: this.people.current() });
         return run;
       }
 
@@ -93,11 +101,11 @@ export class Runner
         while(this.running.size < this.slots && this.queue.length) this.launch(this.queue.shift());
       }
 
-    // Holds a slot for as long as one run takes, then hands it to whoever's next. The catch is there because a
-    // promise nobody catches would crash the whole server.
+    // Holds a slot for as long as one run takes, then hands it to whoever's next. The run works as the person who
+    // started it. The catch is there because a promise nobody catches would crash the whole server.
     launch(item)
       {
-        const work = this.execute(item)
+        const work = this.people.as(item.userId, () => this.execute(item))
           .catch((error) => console.error(`Run ${item.run.id} couldn't save its result:`, error.message))
           .finally(() =>
             {

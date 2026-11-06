@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { prisma } from "../config/prisma.js";
-import { owner } from "../services/users/index.js";
+import { currentUser } from "../services/users/index.js";
 import { MODELS } from "./models.js";
 import { Model } from "./Model.js";
 import { ModelLadder } from "./ModelLadder.js";
@@ -43,7 +43,7 @@ import { GmailConnect } from "../services/email/GmailConnect.js";
 
 const TOGETHER_URL = "https://api.together.xyz/v1";
 
-export const runStore = new RunStore({ db: prisma, userId: () => owner.id() });
+export const runStore = new RunStore({ db: prisma, userId: () => currentUser.id() });
 export const ladder = new ModelLadder(MODELS.map((settings) => new Model(settings)));
 
 // Built when a run starts, not when the server boots, so the server still starts without a key and only AI runs
@@ -108,7 +108,7 @@ const gmailKeysOrNull = () =>
   };
 
 const gmailApi = new GmailApi();
-const mailbox = new MailboxStore({ db: prisma, userId: () => owner.id() });
+const mailbox = new MailboxStore({ db: prisma, userId: () => currentUser.id() });
 const googleAuth = new GoogleAuth({ clientId: process.env.GMAIL_CLIENT_ID, clientSecret: process.env.GMAIL_CLIENT_SECRET, redirectUri: gmailRedirect });
 const gmailKeys = gmailKeysOrNull();
 export const gmailTokens = new GmailTokens({ mailbox, auth: googleAuth, keys: gmailKeys });
@@ -140,7 +140,7 @@ const tasks = new Map(
   ]);
 
 // A task can still set its own budget.
-export const runner = new Runner({ store: runStore, cap, tasks, buildAgent, logFor, runUsd: limits.runUsd });
+export const runner = new Runner({ store: runStore, cap, tasks, buildAgent, logFor, people: currentUser, runUsd: limits.runUsd });
 
 // Where you say yes or no to a run's suggestions. Built here because it reads runs.
 export const suggestionDesk = new SuggestionDesk({ runs: runStore, jobs: jobStore, book: contactBook, card: jobCard });
@@ -150,4 +150,4 @@ export const suggestionDesk = new SuggestionDesk({ runs: runStore, jobs: jobStor
 const MAIL_EVERY_MS = 60_000;
 
 // Started by server.js once Mongo's up.
-export const mailTimer = new MailTimer({ runner, store: runStore, tokens: gmailTokens, check: replyCheck, everyMs: MAIL_EVERY_MS });
+export const mailTimer = new MailTimer({ runner, store: runStore, tokens: gmailTokens, check: replyCheck, everyMs: MAIL_EVERY_MS, people: currentUser, mailboxes: mailbox });

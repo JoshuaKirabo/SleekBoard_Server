@@ -1,6 +1,4 @@
-import { prisma } from "../../config/prisma.js";
-import { Owner } from "./Owner.js";
+import { CurrentUser } from "./CurrentUser.js";
 
-// Until sign-in exists, everything belongs to the account named by OWNER_EMAIL. Sign-in will hand each request the
-// person signed in instead.
-export const owner = new Owner({ db: prisma, email: process.env.OWNER_EMAIL });
+// Whose data each request and each background run works on. Sign-in sets it per request (middleware/requireUser.js).
+export const currentUser = new CurrentUser();

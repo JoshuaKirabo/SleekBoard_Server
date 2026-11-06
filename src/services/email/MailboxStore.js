@@ -101,6 +101,14 @@ export class MailboxStore
           });
       }
 
+    // Everyone with a mailbox, for the email check to go through one by one. The only read here that isn't limited to
+    // the current user, since the clock that asks has nobody signed in.
+    async owners()
+      {
+        const rows = await this.db.mailbox.findMany({ where: { key: this.key }, select: { userId: true }, orderBy: { createdAt: "asc" } });
+        return rows.map((row) => row.userId);
+      }
+
     // The mailbox row, made if it isn't there yet.
     async open(tx)
       {

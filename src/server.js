@@ -2,6 +2,7 @@ import "dotenv/config";
 import app from "./app.js";
 import { DatabaseUrl } from "./config/DatabaseUrl.js";
 import { runStore, mailTimer } from "./agent/container.js";
+import { authSettings } from "./services/auth/index.js";
 
 const PORT = process.env.PORT || 5050;
 // Only this Mac can reach it. Leaving the host off listens on every network, so anyone on the same Wi-Fi could hit
@@ -54,6 +55,8 @@ const start = async () =>
   {
     try
       {
+        // Sign-in's settings first: no session secret, or a deploy that would let any site in, stops the start.
+        authSettings.check();
         // Runs that were mid-way when the server last stopped can't finish now, so they get marked failed.
         await runStore.failInterrupted();
         // Checks your inbox for replies every so often. Does nothing until Gmail is connected.
