@@ -5,9 +5,12 @@
 //   GOOGLE_SIGNIN_REDIRECT_URI  where Google sends you back. Defaults to this Mac's /api/auth/google/callback, and
 //                               has to match a redirect URI on the client in Google Cloud.
 //   CLIENT_URL                  the board. You land on its first origin after signing in.
+//   TRUST_PROXY_HOPS            how many proxies sit in front of the server (see trustProxyHops below).
 //
 // Cloud Run sets K_SERVICE on its own, which is how this knows it's sitting behind Google's proxy.
 const MIN_SECRET = 32;
+// More than five forwarding steps is no setup we'd run, so a bigger number is a typo.
+const MAX_HOPS = 5;
 const DAY_MS = 24 * 60 * 60_000;
 
 export class AuthSettings
@@ -54,6 +57,16 @@ export class AuthSettings
     isBehindProxy()
       {
         return Boolean(this.env.K_SERVICE);
+      }
+
+    // How many proxies Express trusts to tell it the visitor's address (app.js). Unset: 1 on Cloud Run (Google's front
+    // end), 0 anywhere else. A number, never the string: Express reads a string as a list of trusted IP addresses.
+    trustProxyHops()
+      {
+        const raw = (this.env.TRUST_PROXY_HOPS || "").trim();
+        if(!raw) return this.isBehindProxy() ? 1 : 0;
+        if(!/^\d+$/.test(raw) || Number(raw) > MAX_HOPS) throw new Error(`TRUST_PROXY_HOPS has to be a whole number from 0 to ${MAX_HOPS}. It's "${raw}".`);
+        return Number(raw);
       }
 
     // Every new session's cookie, Google sign-in's included: 30 days. The email + password form sets its own below.
@@ -106,5 +119,8 @@ export class AuthSettings
         if(this.secret().length < MIN_SECRET) throw new Error(`SESSION_SECRET is too short. It needs ${MIN_SECRET}+ characters.`);
         // Without CLIENT_URL a deploy would send you to this Mac's localhost after signing in, so it must name the board.
         if(this.isBehindProxy() && !this.env.CLIENT_URL) throw new Error("CLIENT_URL has to be set on Cloud Run: it's the board sign-in sends you back to.");
+        // app.js reads the hop count as it loads, so a bad one stops the start there first. 0 on Cloud Run would make
+        // every visitor Google's front end: one shared address for the sign-in limits, and no https, so no cookie.
+        if(this.isBehindProxy() && this.trustProxyHops() === 0) throw new Error("TRUST_PROXY_HOPS can't be 0 on Cloud Run: Google's front end is always one hop.");
       }
   }
