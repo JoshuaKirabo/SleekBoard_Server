@@ -83,15 +83,15 @@ before(async () =>
     const passport = new Passport();
     const gate = new SignInGate({ emails: [ownerEmail, googleOnlyEmail] });
     const logins = new LoginBook({ db, linkableEmail: ownerEmail });
-    new PassportSetup({ passport, settings, signIn: new SignIn({ gate, logins }), logins }).install();
     const hasher = new PasswordHash();
     const passwords = new PasswordSignIn({ gate, passwords: new PasswordBook({ db }), hasher });
+    new PassportSetup({ passport, settings, signIn: new SignIn({ gate, logins }), logins, passwords }).install();
 
     const server = express();
     server.use(express.json());
     server.use(express.urlencoded({ extended: true }));
     server.use("/api", sessions({ settings, pool, prune: false }), passport.authenticate("session"));
-    server.use("/api/auth", authRoutes(new AuthController({ passport, settings, passwords })));
+    server.use("/api/auth", authRoutes(new AuthController({ passport, settings })));
     app = await new Promise((resolve) =>
       {
         const listening = server.listen(0, "127.0.0.1", () => resolve(listening));
@@ -213,4 +213,44 @@ test("signing out after a password sign-in ends the session", { skip }, async ()
     assert.equal(out.status, 204);
     assert.equal(await sessionRow(cookie), null);
     assert.equal((await me(cookie)).status, 401);
+  });
+
+test("only a JSON body is read: a form post, plain text or no body gets 415 and no session, even with the right password", { skip }, async () =>
+  {
+    const right = { email: ownerEmail, password: PASSWORD, remember: "true" };
+    const tries =
+      [
+        // What a cross-site HTML form sends, and the forms that need no CORS check first.
+        { "content-type": "application/x-www-form-urlencoded", body: new URLSearchParams(right).toString() },
+        { "content-type": "text/plain", body: JSON.stringify(right) },
+        { "content-type": "multipart/form-data; boundary=x", body: `--x\r\nContent-Disposition: form-data; name="email"\r\n\r\n${ownerEmail}\r\n--x--\r\n` },
+        { body: undefined },
+      ];
+    for(const { body, ...headers } of tries)
+      {
+        const res = await fetch(`${base()}/api/auth/login`, { method: "POST", headers, body });
+        assert.equal(res.status, 415, headers["content-type"] || "no body");
+        assert.equal(setCookieOf(res), "", `a session was started for ${headers["content-type"]}`);
+      }
+  });
+
+test("JSON with a charset still signs in", { skip }, async () =>
+  {
+    const res = await fetch(`${base()}/api/auth/login`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ email: ownerEmail, password: PASSWORD }),
+      });
+    assert.equal(res.status, 200);
+    cookieFrom(res);
+  });
+
+test("an email and password in the query string are never read", { skip }, async () =>
+  {
+    const query = new URLSearchParams({ email: ownerEmail, password: PASSWORD });
+    const res = await fetch(`${base()}/api/auth/login?${query}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    assert.equal(res.status, 401);
+    assert.deepEqual(await res.json(), { message: WRONG_LOGIN });
+    assert.equal(setCookieOf(res), "");
   });

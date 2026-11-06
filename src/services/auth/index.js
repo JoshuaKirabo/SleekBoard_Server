@@ -20,9 +20,8 @@ export const authSettings = new AuthSettings({ env: process.env });
 const gate = new SignInGate({ emails: [process.env.OWNER_EMAIL] });
 const logins = new LoginBook({ db: prisma, linkableEmail: process.env.OWNER_EMAIL });
 const signIn = new SignIn({ gate, logins });
-new PassportSetup({ passport, settings: authSettings, signIn, logins }).install();
-
-export const passwordSignIn = new PasswordSignIn({ gate, passwords: new PasswordBook({ db: prisma }), hasher: new PasswordHash() });
+const passwords = new PasswordSignIn({ gate, passwords: new PasswordBook({ db: prisma }), hasher: new PasswordHash() });
+new PassportSetup({ passport, settings: authSettings, signIn, logins, passwords }).install();
 
 // The session store gets its own small pool, as sleekboard_app, held to the same rule as Prisma's: a database off
 // this Mac only over an encrypted connection.

@@ -6,6 +6,9 @@
 // emails have accounts or passwords.
 const TURNED_AWAY = { reason: "wrong" };
 
+// What the login screen shows for every one of them.
+export const WRONG_LOGIN = "That email and password don't match an account.";
+
 export class PasswordSignIn
   {
     constructor({ gate, passwords, hasher })

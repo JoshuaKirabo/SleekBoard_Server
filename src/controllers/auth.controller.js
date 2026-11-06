@@ -1,9 +1,10 @@
 import { StatusCodes } from "http-status-codes";
 import { SESSION_COOKIE, sessionCookie } from "../config/session.js";
 import { PasswordLogin } from "../services/auth/PasswordLogin.js";
+import { WRONG_LOGIN } from "../services/auth/PasswordSignIn.js";
 
 // One answer for every failed email + password sign-in, so it never says which part was wrong.
-export const WRONG_LOGIN = "That email and password don't match an account.";
+export { WRONG_LOGIN };
 
 // Sign-in's routes, after passport/todos-express-google's routes/auth.js. Start and callback are plain links the
 // login screen opens, so they send you on (to Google, then to the board or back to /login?signin=error&reason=…)
@@ -11,11 +12,10 @@ export const WRONG_LOGIN = "That email and password don't match an account.";
 // Email + password is a fetch from the login form, so it answers with JSON instead.
 export class AuthController
   {
-    constructor({ passport, settings, passwords })
+    constructor({ passport, settings })
       {
         this.passport = passport;
         this.settings = settings;
-        this.passwords = passwords;
       }
 
     // GET /api/auth/google. Off to Google's account picker.
@@ -58,18 +58,25 @@ export class AuthController
         return "cancelled";
       }
 
-    // POST /api/auth/login with { email, password, remember }. Flask-Login's login_user: req.logIn starts a fresh
-    // session for the user (passport 0.7 swaps the session id, so nothing from before carries over).
-    async logIn(req, res, next)
+    // POST /api/auth/login with { email, password, remember }. passport-local's strategy (PassportSetup) checks the
+    // email and password. todos-express-password lets passport redirect; this answers JSON itself, so it takes over.
+    logIn(req, res, next)
       {
-        const login = new PasswordLogin(req.body);
-        const result = await this.passwords.attempt(login);
-        if(!result.user) return res.status(StatusCodes.UNAUTHORIZED).json({ message: WRONG_LOGIN });
-        req.logIn(result.user, (error) =>
+        this.passport.authenticate("local", (error, user) => this.admit(req, res, next, { error, user }))(req, res, next);
+      }
+
+    // Flask-Login's login_user: req.logIn starts a fresh session for the user (passport 0.7 swaps the session id, so
+    // nothing from before carries over). Every failure, passport-local's own "Missing credentials" too, gets the one
+    // message.
+    admit(req, res, next, { error, user })
+      {
+        if(error) return next(error);
+        if(!user) return res.status(StatusCodes.UNAUTHORIZED).json({ message: WRONG_LOGIN });
+        req.logIn(user, (loginError) =>
           {
-            if(error) return next(error);
-            this.keepFor(req, login.remember());
-            this.answerSaved(req, res, next, { user: result.user });
+            if(loginError) return next(loginError);
+            this.keepFor(req, new PasswordLogin(req.body).remember());
+            this.answerSaved(req, res, next, { user });
           });
       }
 
