@@ -22,6 +22,19 @@ export class DatabaseUrl
         return this.config.host || "";
       }
 
+    // The database and where it is, like sleekboard@localhost. What you type to confirm wiping it.
+    label()
+      {
+        return `${this.config.database || ""}@${this.host()}`;
+      }
+
+    // Whether what you typed names this database exactly. A proxy can make a cloud database look like localhost,
+    // so being on this Mac isn't enough to skip the question.
+    isConfirmedBy(typed)
+      {
+        return typed === this.label();
+      }
+
     isLocal()
       {
         return LOCAL_HOSTS.includes(this.host());

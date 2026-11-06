@@ -48,6 +48,21 @@ test("the error names the host but never the password", () =>
     assert.throws(() => safe("postgresql://app:hunter2@db.example.com/sleekboard"), (error) => !error.message.includes("hunter2"));
   });
 
+test("the label names the database and where it is", () =>
+  {
+    assert.equal(new DatabaseUrl("postgresql://app@localhost:5432/sleekboard").label(), "sleekboard@localhost");
+    assert.equal(new DatabaseUrl("postgresql://app:pw@/sleekboard?host=/cloudsql/p:r:i").label(), "sleekboard@/cloudsql/p:r:i");
+  });
+
+test("wiping only goes ahead when the confirmation names this exact database", () =>
+  {
+    const local = new DatabaseUrl("postgresql://app@localhost:5432/sleekboard");
+    assert.equal(local.isConfirmedBy("sleekboard@localhost"), true);
+    assert.equal(local.isConfirmedBy(""), false);
+    assert.equal(local.isConfirmedBy("sleekboard@db.example.com"), false);
+    assert.equal(local.isConfirmedBy("other@localhost"), false);
+  });
+
 test("a missing DATABASE_URL says so", () =>
   {
     assert.throws(() => new DatabaseUrl(undefined), /DATABASE_URL is missing/);

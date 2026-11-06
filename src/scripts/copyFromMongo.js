@@ -1,13 +1,18 @@
 import "dotenv/config";
 import mongoose from "mongoose";
 import { connectDB } from "../config/db.js";
+import { DatabaseUrl } from "../config/DatabaseUrl.js";
 import { prisma } from "../config/prisma.js";
 
 // Copies everything in Mongo (Atlas) into Postgres, once, then checks every record came across the same. Mongo has
 // no accounts, so every record goes to one owner, made from the email you give if they don't exist yet.
 //
 //   npm run db:copy -- --owner you@example.com           copies, but only if that owner has nothing yet
-//   npm run db:copy -- --owner you@example.com --fresh   empties that owner's rows first, then copies
+//   npm run db:copy -- --owner you@example.com --fresh --confirm sleekboard@localhost
+//                                                        empties that owner's rows first, then copies
+//
+// --fresh deletes rows, so it only runs when --confirm names the database it's pointed at, every time. Even
+// localhost: Cloud SQL's proxy makes the real database look like localhost too.
 //
 // Every record keeps its Mongo id as its Postgres id, so links between records, and ids saved inside a run's result,
 // still point at the right thing. New records get uuids. Both are just text to the app.
@@ -335,6 +340,14 @@ const ownerEmail = argument("--owner");
 if(!ownerEmail.includes("@"))
   {
     console.error("Say who owns the copied data: npm run db:copy -- --owner you@example.com");
+    process.exit(1);
+  }
+
+// Checked before connecting to anything, so a wrong DATABASE_URL never gets touched.
+const database = new DatabaseUrl(process.env.DATABASE_URL);
+if(fresh && !database.isConfirmedBy(argument("--confirm")))
+  {
+    console.error(`--fresh deletes ${ownerEmail}'s rows in ${database.label()}. If that's the one you mean, add --confirm ${database.label()}`);
     process.exit(1);
   }
 
