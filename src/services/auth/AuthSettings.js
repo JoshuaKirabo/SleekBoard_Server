@@ -76,6 +76,13 @@ export class AuthSettings
         return DAY_MS / 1000;
       }
 
+    // The most any sign-in lasts, used or not (SessionLifetime): 30 days from signing in, ticked, unticked or Google.
+    // Ticked and Google cookies already end then in the browser; this makes the server end them then too.
+    signedInMaxMs()
+      {
+        return 30 * DAY_MS;
+      }
+
     // The board's own address, from the first of CLIENT_URL's origins.
     clientUrl()
       {

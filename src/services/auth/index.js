@@ -13,6 +13,7 @@ import { PasswordHash } from "./PasswordHash.js";
 import { PasswordSignIn } from "./PasswordSignIn.js";
 import { DecoyHash } from "./DecoyHash.js";
 import { LoginLimits } from "./LoginLimits.js";
+import { SessionLifetime } from "./SessionLifetime.js";
 
 // Sign-in, wired once for the whole server. Only the owner (OWNER_EMAIL) gets in for now, and their first Google
 // sign-in links to the account db:copy made for them. Email + password goes through the same gate, and only works
@@ -38,5 +39,8 @@ pool.on("error", (error) => console.error("Session store connection dropped:", e
 // Failed email + password tries, counted in Postgres (login_limits) so a restart or a second server doesn't reset them.
 export const loginLimits = LoginLimits.inPostgres({ pool });
 
-export const sessionMiddleware = sessions({ settings: authSettings, pool });
+// The 30 days from sign-in that no session outlives, however much it's used.
+export const sessionLifetime = new SessionLifetime({ settings: authSettings });
+
+export const sessionMiddleware = sessions({ settings: authSettings, pool, lifetime: sessionLifetime });
 export { passport };

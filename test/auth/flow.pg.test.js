@@ -14,6 +14,7 @@ import { PassportSetup } from "../../src/services/auth/PassportSetup.js";
 import { AuthController } from "../../src/controllers/auth.controller.js";
 import { authRoutes } from "../../src/routes/auth.router.js";
 import { sessions, SESSION_COOKIE } from "../../src/config/session.js";
+import { SessionLifetime } from "../../src/services/auth/SessionLifetime.js";
 import { CurrentUser } from "../../src/services/users/CurrentUser.js";
 import { requireUser } from "../../src/middleware/requireUser.js";
 import { JobStore } from "../../src/services/jobs/JobStore.js";
@@ -139,9 +140,11 @@ before(async () =>
     const people = new CurrentUser();
     const jobs = new JobStore({ db, userId: () => people.id() });
 
+    const lifetime = new SessionLifetime({ settings });
+
     const server = express();
-    server.use("/api", sessions({ settings, pool, prune: false }), passport.authenticate("session"));
-    server.use("/api/auth", authRoutes(new AuthController({ passport, settings })));
+    server.use("/api", sessions({ settings, pool, prune: false, lifetime }), passport.authenticate("session"));
+    server.use("/api/auth", authRoutes(new AuthController({ passport, settings, lifetime })));
     // The same lock routes/index.js puts in front of jobs, contacts, runs and Gmail.
     server.use("/api", requireUser(people));
     server.get("/api/jobs", async (req, res) => res.json(await jobs.list()));
@@ -227,6 +230,23 @@ test("a Google sign-in still lasts 30 days, on the cookie and on its row", { ski
     // Worked out inside Postgres: expire has no time zone, and Postgres and Node can sit in different ones.
     const { rows } = await pool.query("select extract(epoch from expire - localtimestamp) * 1000 as left_ms from sessions where sid = $1", [sidOf(cookie)]);
     assert.ok(Math.abs(Number(rows[0].left_ms) - 30 * DAY_MS) < 60_000, `row ends in ${rows[0].left_ms} ms`);
+  });
+
+// SessionLifetime: Google sign-ins get the same 30 days from sign-in as email + password ones, however much they're
+// used. Compared inside Postgres, like the row's end above.
+test("a Google sign-in is stamped, its row never ends after the stamp's 30 days, and past them it's signed out", { skip }, async () =>
+  {
+    const { cookie } = await signInAs({ email: ownerEmail, sub: await ownerSub() });
+    const stamped = await pool.query(
+      `select abs((sess->>'signedInAt')::bigint - extract(epoch from now()) * 1000) as off_ms,
+              expire <= to_timestamp(((sess->>'signedInAt')::bigint + $2) / 1000.0)::timestamp as within
+         from sessions where sid = $1`, [sidOf(cookie), 30 * DAY_MS]);
+    assert.ok(Number(stamped.rows[0].off_ms) < 60_000, `stamped ${stamped.rows[0].off_ms} ms from now`);
+    assert.equal(stamped.rows[0].within, true);
+    await pool.query("update sessions set sess = jsonb_set(sess::jsonb, '{signedInAt}', to_jsonb((extract(epoch from now()) * 1000)::bigint - $2 - 1000))::json where sid = $1", [sidOf(cookie), 30 * DAY_MS]);
+    assert.equal((await me(cookie)).status, 401);
+    assert.equal((await get("/api/jobs", cookie)).status, 401);
+    assert.equal(await sessionRows(cookie), 0);
   });
 
 test("someone else's Google account is turned away and no account is made for them", { skip }, async () =>

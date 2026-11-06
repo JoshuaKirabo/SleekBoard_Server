@@ -2,6 +2,7 @@ import { StatusCodes } from "http-status-codes";
 import { SESSION_COOKIE, sessionCookie } from "../config/session.js";
 import { PasswordLogin } from "../services/auth/PasswordLogin.js";
 import { WRONG_LOGIN } from "../services/auth/PasswordSignIn.js";
+import { SessionLifetime } from "../services/auth/SessionLifetime.js";
 
 // One answer for every failed email + password sign-in, so it never says which part was wrong.
 export { WRONG_LOGIN };
@@ -15,14 +16,16 @@ export const LIMITS_DOWN = "Sign-in isn't available right now. Try again in a mi
 // Email + password is a fetch from the login form, so it answers with JSON instead.
 //
 // `limits` counts failed email + password tries (LoginLimits, in Postgres). Without them email + password sign-in
-// answers 503 (limitsDown) rather than going unlimited.
+// answers 503 (limitsDown) rather than going unlimited. `lifetime` stamps each sign-in (SessionLifetime), so the
+// session ends 30 days later however much it's used.
 export class AuthController
   {
-    constructor({ passport, settings, limits })
+    constructor({ passport, settings, limits, lifetime = new SessionLifetime({ settings }) })
       {
         this.passport = passport;
         this.settings = settings;
         this.limits = limits;
+        this.lifetime = lifetime;
       }
 
     // GET /api/auth/google. Off to Google's account picker.
@@ -39,7 +42,8 @@ export class AuthController
         this.passport.authenticate("google", (error, user, info) => this.land(req, res, next, { error, user, info }))(req, res, next);
       }
 
-    // Signs the user in (a fresh session, so nothing from before carries over) and sends them to the board.
+    // Signs the user in (a fresh session, so nothing from before carries over), stamps when, and sends them to the
+    // board.
     land(req, res, next, { error, user, info })
       {
         if(error)
@@ -52,6 +56,17 @@ export class AuthController
         req.logIn(user, (loginError) =>
           {
             if(loginError) return next(loginError);
+            this.lifetime.stamp(req.session);
+            this.landSaved(req, res, next);
+          });
+      }
+
+    // Saves the stamp before sending you on, so the board's first request already finds it.
+    landSaved(req, res, next)
+      {
+        req.session.save((error) =>
+          {
+            if(error) return next(error);
             res.redirect(this.settings.successUrl());
           });
       }
@@ -85,8 +100,9 @@ export class AuthController
       }
 
     // Flask-Login's login_user: req.logIn starts a fresh session for the user (passport 0.7 swaps the session id, so
-    // nothing from before carries over). Every failure, passport-local's own "Missing credentials" too, gets the one
-    // message and keeps the count it was given. A right password hands its count back first.
+    // nothing from before carries over), and the stamp goes into that fresh one. Every failure, passport-local's own
+    // "Missing credentials" too, gets the one message and keeps the count it was given. A right password hands its
+    // count back first.
     async admit(req, res, next, { error, user, login })
       {
         if(error) return next(error);
@@ -102,6 +118,7 @@ export class AuthController
         req.logIn(user, (loginError) =>
           {
             if(loginError) return next(loginError);
+            this.lifetime.stamp(req.session);
             this.keepFor(req, login.remember());
             this.answerSaved(req, res, next, { user });
           });

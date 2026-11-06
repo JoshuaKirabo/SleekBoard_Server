@@ -18,6 +18,7 @@ import { DecoyHash } from "../../src/services/auth/DecoyHash.js";
 import { AuthController, WRONG_LOGIN } from "../../src/controllers/auth.controller.js";
 import { authRoutes } from "../../src/routes/auth.router.js";
 import { sessions, SESSION_COOKIE } from "../../src/config/session.js";
+import { SessionLifetime } from "../../src/services/auth/SessionLifetime.js";
 
 // Email + password sign-in end to end: the real /api/auth/login route, passport, argon2 hashes in the test database's
 // users table, and sessions in its sessions table. Skipped unless TEST_DATABASE_URL is set; `npm run test:db` runs it.
@@ -110,11 +111,13 @@ before(async () =>
     const passwords = new PasswordSignIn({ gate, passwords: new PasswordBook({ db }), hasher, decoy });
     new PassportSetup({ passport, settings, signIn: new SignIn({ gate, logins }), logins, passwords }).install();
 
+    const lifetime = new SessionLifetime({ settings });
+
     const server = express();
     server.use(express.json());
     server.use(express.urlencoded({ extended: true }));
-    server.use("/api", sessions({ settings, pool, prune: false }), passport.authenticate("session"));
-    server.use("/api/auth", authRoutes(new AuthController({ passport, settings, limits: new NoLimits() })));
+    server.use("/api", sessions({ settings, pool, prune: false, lifetime }), passport.authenticate("session"));
+    server.use("/api/auth", authRoutes(new AuthController({ passport, settings, limits: new NoLimits(), lifetime })));
     app = await new Promise((resolve) =>
       {
         const listening = server.listen(0, "127.0.0.1", () => resolve(listening));

@@ -1,5 +1,6 @@
 import session from "express-session";
-import connectPgSimple from "connect-pg-simple";
+import { CappedPgStore } from "./CappedPgStore.js";
+import { SessionLifetime } from "../services/auth/SessionLifetime.js";
 
 // Who's signed in on each browser, kept in Postgres' sessions table (prisma/schema.prisma), so a restart or a deploy
 // doesn't sign anyone out and signing out really ends it. After passport/todos-express-google's app.js, with their
@@ -10,8 +11,6 @@ import connectPgSimple from "connect-pg-simple";
 // Never None: that would let any site use your session.
 export const SESSION_COOKIE = "sb_session";
 
-const PgStore = connectPgSimple(session);
-
 export const sessionCookie = (settings) => ({ httpOnly: true, sameSite: "lax", secure: settings.isSecure(), path: "/" });
 
 // `prune` is how often old sessions get swept out (connect-pg-simple's default is 15 minutes). Tests turn it off.
@@ -20,9 +19,12 @@ export const sessionCookie = (settings) => ({ httpOnly: true, sameSite: "lax", s
 // days); the browser keeps the date it was first given, since `rolling` is off, as in Mailtrain. A cookie with no date
 // (remember unticked) gets `ttl` from its last request instead: connect-pg-simple's own default of a day, written out
 // so the choice is here rather than in the library.
-export const sessions = ({ settings, pool, prune }) =>
+//
+// Either way, a signed-in row never ends later than its sign-in's end (`lifetime`, SessionLifetime), so no session
+// outlives 30 days from sign-in however often it's used, and one past them is loaded as signed out (CappedPgStore).
+export const sessions = ({ settings, pool, prune, lifetime = new SessionLifetime({ settings }) }) =>
   {
-    const store = new PgStore({ pool, tableName: "sessions", pruneSessionInterval: prune, ttl: settings.browserSessionIdleSeconds() });
+    const store = new CappedPgStore({ lifetime, pool, tableName: "sessions", pruneSessionInterval: prune, ttl: settings.browserSessionIdleSeconds() });
     return session(
       {
         name: SESSION_COOKIE,
