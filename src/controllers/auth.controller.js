@@ -6,16 +6,23 @@ import { WRONG_LOGIN } from "../services/auth/PasswordSignIn.js";
 // One answer for every failed email + password sign-in, so it never says which part was wrong.
 export { WRONG_LOGIN };
 
+// When the failed-try counts can't be read or written. Sign-in stays shut rather than letting guesses through uncounted.
+export const LIMITS_DOWN = "Sign-in isn't available right now. Try again in a minute.";
+
 // Sign-in's routes, after passport/todos-express-google's routes/auth.js. Start and callback are plain links the
 // login screen opens, so they send you on (to Google, then to the board or back to /login?signin=error&reason=…)
 // instead of answering with JSON. You always land on the board's fixed address, never one taken from the link.
 // Email + password is a fetch from the login form, so it answers with JSON instead.
+//
+// `limits` counts failed email + password tries (LoginLimits, in Postgres). Without them email + password sign-in
+// answers 503 (limitsDown) rather than going unlimited.
 export class AuthController
   {
-    constructor({ passport, settings })
+    constructor({ passport, settings, limits })
       {
         this.passport = passport;
         this.settings = settings;
+        this.limits = limits;
       }
 
     // GET /api/auth/google. Off to Google's account picker.
@@ -58,26 +65,71 @@ export class AuthController
         return "cancelled";
       }
 
-    // POST /api/auth/login with { email, password, remember }. passport-local's strategy (PassportSetup) checks the
-    // email and password. todos-express-password lets passport redirect; this answers JSON itself, so it takes over.
-    logIn(req, res, next)
+    // POST /api/auth/login with { email, password, remember }. The try is counted first (LoginLimits.countTry), so
+    // someone over a limit doesn't get a password checked, the right one included. Then passport-local's strategy
+    // (PassportSetup) checks the email and password. todos-express-password lets passport redirect; this answers JSON
+    // itself, so it takes over.
+    async logIn(req, res, next)
       {
-        this.passport.authenticate("local", (error, user) => this.admit(req, res, next, { error, user }))(req, res, next);
+        const login = new PasswordLogin(req.body);
+        try
+          {
+            const wait = await this.limits.countTry(login, req.ip);
+            if(wait > 0) return this.tooMany(res, wait);
+          }
+        catch(error)
+          {
+            return this.limitsDown(res, error);
+          }
+        this.passport.authenticate("local", (error, user) => this.admit(req, res, next, { error, user, login }))(req, res, next);
       }
 
     // Flask-Login's login_user: req.logIn starts a fresh session for the user (passport 0.7 swaps the session id, so
     // nothing from before carries over). Every failure, passport-local's own "Missing credentials" too, gets the one
-    // message.
-    admit(req, res, next, { error, user })
+    // message and keeps the count it was given. A right password hands its count back first.
+    async admit(req, res, next, { error, user, login })
       {
         if(error) return next(error);
         if(!user) return res.status(StatusCodes.UNAUTHORIZED).json({ message: WRONG_LOGIN });
+        try
+          {
+            await this.limits.succeeded(login, req.ip);
+          }
+        catch(limitsError)
+          {
+            return this.limitsDown(res, limitsError);
+          }
         req.logIn(user, (loginError) =>
           {
             if(loginError) return next(loginError);
-            this.keepFor(req, new PasswordLogin(req.body).remember());
+            this.keepFor(req, login.remember());
             this.answerSaved(req, res, next, { user });
           });
+      }
+
+    // 429 with Retry-After in seconds, as the wiki answers, and a sentence the login form can show as it is.
+    tooMany(res, seconds)
+      {
+        res.set("Retry-After", String(seconds));
+        res.status(StatusCodes.TOO_MANY_REQUESTS).json({ message: `Too many sign-in attempts. Try again in ${this.waitWords(seconds)}.` });
+      }
+
+    // "a minute", "12 minutes", "1 hour", "24 hours". Rounded up, so it never promises sooner than Retry-After.
+    waitWords(seconds)
+      {
+        const minutes = Math.ceil(seconds / 60);
+        if(minutes <= 1) return "a minute";
+        if(minutes < 60) return `${minutes} minutes`;
+        const hours = Math.ceil(minutes / 60);
+        return hours === 1 ? "1 hour" : `${hours} hours`;
+      }
+
+    // The counts live in Postgres with the users and sessions, so when they can't be read or written, sign-in couldn't
+    // work anyway. Shut, said out loud in the log and in the answer, rather than letting tries through uncounted.
+    limitsDown(res, error)
+      {
+        console.error("Sign-in limits couldn't be checked, so email + password sign-in is shut:", error.message);
+        res.status(StatusCodes.SERVICE_UNAVAILABLE).json({ message: LIMITS_DOWN });
       }
 
     // Remember ticked keeps the session's usual 30 days. Unticked, the cookie loses its expiry date, so the browser

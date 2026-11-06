@@ -77,6 +77,18 @@ model Session {
   @@map("sessions")
 }
 
+// Failed email + password sign-ins, counted per IP and per email + IP (LoginLimits). rate-limiter-flexible's
+// RateLimiterPostgres reads and writes it, so the columns match its own CREATE TABLE exactly, in the same order: its
+// INSERT names no columns. It's made here because the server's user can't create tables. expire is milliseconds since
+// 1970, as the library keeps it.
+model LoginLimit {
+  key    String  @id @db.VarChar(255)
+  points Int     @default(0)
+  expire BigInt?
+
+  @@map("login_limits")
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Jobs
 // ---------------------------------------------------------------------------------------------------------------

@@ -37,6 +37,20 @@ const googleOnlyEmail = `google-${randomUUID()}@example.com`;
 // Every session id the tests were handed, so after() can sweep them all.
 const sids = new Set();
 
+// Limits that never block. These tests make far more than 10 wrong tries from 127.0.0.1 (the timing one alone makes
+// dozens), and the limits have tests of their own (limits.test.js, limits.pg.test.js).
+class NoLimits
+  {
+    async countTry()
+      {
+        return 0;
+      }
+
+    async succeeded()
+      {
+      }
+  }
+
 const base = () => `http://127.0.0.1:${app.address().port}`;
 
 // The session's id inside a signed cookie (s:<id>.<signature>).
@@ -94,7 +108,7 @@ before(async () =>
     server.use(express.json());
     server.use(express.urlencoded({ extended: true }));
     server.use("/api", sessions({ settings, pool, prune: false }), passport.authenticate("session"));
-    server.use("/api/auth", authRoutes(new AuthController({ passport, settings })));
+    server.use("/api/auth", authRoutes(new AuthController({ passport, settings, limits: new NoLimits() })));
     app = await new Promise((resolve) =>
       {
         const listening = server.listen(0, "127.0.0.1", () => resolve(listening));

@@ -31,7 +31,8 @@
     "passport-google-oauth20": "^2.0.0",
     "passport-local": "^1.0.0",
     "pg": "^8.23.1",
-    "pg-connection-string": "^2.14.1"
+    "pg-connection-string": "^2.14.1",
+    "rate-limiter-flexible": "^11.3.0"
   },
   "devDependencies": {
     "mongoose": "^8.24.8",

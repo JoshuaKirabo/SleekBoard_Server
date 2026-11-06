@@ -19,7 +19,9 @@ app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // On Cloud Run, Google's proxy talks https to the browser and plain http to us. Trusting one hop lets the session see
-// the real https, so its secure cookie gets set.
+// the real https, so its secure cookie gets set. It also makes req.ip the address Google's proxy saw (the last one it
+// added to X-Forwarded-For, not one the browser made up), which the sign-in limits count by. Off Cloud Run nothing
+// is trusted, so req.ip is whoever connected.
 if(authSettings.isBehindProxy()) app.set("trust proxy", 1);
 // Who's signed in: the session from the cookie, then passport turns its user id into req.user.
 app.use("/api", sessionMiddleware, passport.authenticate("session"));

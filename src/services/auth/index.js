@@ -12,6 +12,7 @@ import { PasswordBook } from "./PasswordBook.js";
 import { PasswordHash } from "./PasswordHash.js";
 import { PasswordSignIn } from "./PasswordSignIn.js";
 import { DecoyHash } from "./DecoyHash.js";
+import { LoginLimits } from "./LoginLimits.js";
 
 // Sign-in, wired once for the whole server. Only the owner (OWNER_EMAIL) gets in for now, and their first Google
 // sign-in links to the account db:copy made for them. Email + password goes through the same gate, and only works
@@ -28,11 +29,14 @@ decoy.stored().catch((error) => console.error("Making the decoy password hash fa
 const passwords = new PasswordSignIn({ gate, passwords: new PasswordBook({ db: prisma }), hasher, decoy });
 new PassportSetup({ passport, settings: authSettings, signIn, logins, passwords }).install();
 
-// The session store gets its own small pool, as sleekboard_app, held to the same rule as Prisma's: a database off
-// this Mac only over an encrypted connection.
+// The session store and the sign-in limits share their own small pool, as sleekboard_app, held to the same rule as
+// Prisma's: a database off this Mac only over an encrypted connection.
 const pool = new pg.Pool({ connectionString: new DatabaseUrl(process.env.DATABASE_URL).requireSafe().toString(), max: 3 });
 // An idle connection dropping (Postgres restarting, say) shouldn't take the server down. The next request reconnects.
 pool.on("error", (error) => console.error("Session store connection dropped:", error.message));
+
+// Failed email + password tries, counted in Postgres (login_limits) so a restart or a second server doesn't reset them.
+export const loginLimits = LoginLimits.inPostgres({ pool });
 
 export const sessionMiddleware = sessions({ settings: authSettings, pool });
 export { passport };
