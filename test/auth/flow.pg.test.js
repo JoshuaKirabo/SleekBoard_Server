@@ -315,3 +315,31 @@ test("signing out locks the door again", { skip }, async () =>
     await fetch(`${base(app)}/api/auth/logout`, { method: "POST", headers: { cookie } });
     assert.equal((await get("/api/jobs", cookie)).status, 401);
   });
+
+// Google ties an email to one account id (sub) and never hands out a mix, but a stand-in can. Whatever the email says,
+// a sign-in is the account its sub is linked to, and it never adds, moves or swaps a link.
+test("a Google profile whose email and account id disagree signs in by the account id and leaves every link alone", { skip }, async () =>
+  {
+    const subOf = async (email) => (await db.federatedCredential.findFirst({ where: { user: { email } } })).subject;
+    // Both people need their own Google account linked. The earlier tests did it; when this test runs on its own, this
+    // links the friend (and is turned away as not_linkable when they already are).
+    await signInAs({ email: friendEmail, sub: randomUUID() });
+    const links = async () => (await db.federatedCredential.findMany({ where: { user: { email: { in: [ownerEmail, friendEmail] } } }, select: { subject: true, user: { select: { email: true } } }, orderBy: { subject: "asc" } }));
+    const before = await links();
+    const ownerSubject = await subOf(ownerEmail);
+    const friendSubject = await subOf(friendEmail);
+
+    // The owner's email on the friend's account id: that's the friend, not the owner.
+    const ownerEmailFriendSub = await signInAs({ email: ownerEmail, sub: friendSubject });
+    assert.equal((await me(ownerEmailFriendSub.cookie)).body.user.email, friendEmail);
+    // The friend's email on the owner's account id: the owner's account, the way Google's own id says.
+    const friendEmailOwnerSub = await signInAs({ email: friendEmail, sub: ownerSubject });
+    assert.equal((await me(friendEmailOwnerSub.cookie)).body.user.email, ownerEmail);
+    // The owner's account id with no email, or an unverified one: turned away at the gate, before any lookup.
+    assert.equal((await signInAs({ email: "", sub: ownerSubject })).back.headers.get("location"), `${CLIENT}/login?signin=error&reason=not_allowed`);
+    assert.equal((await signInAs({ email: ownerEmail, sub: ownerSubject, email_verified: false })).back.headers.get("location"), `${CLIENT}/login?signin=error&reason=not_allowed`);
+
+    // Not one link added, moved or swapped, and nobody new was made.
+    assert.deepEqual(await links(), before);
+    assert.equal(await db.user.count({ where: { email: { in: [ownerEmail, friendEmail] } } }), 2);
+  });
