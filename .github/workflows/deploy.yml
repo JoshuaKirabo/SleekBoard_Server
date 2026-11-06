@@ -1,0 +1,73 @@
+# Builds the server image on every push to main, pushes it to Artifact
+# Registry tagged with the commit SHA, then points Cloud Run at it.
+#
+# Set these under GitHub repo -> Settings -> Secrets and variables -> Actions:
+#   Variables: GCP_PROJECT_ID, GCP_REGION, GCP_WIF_PROVIDER, GCP_SERVICE_ACCOUNT
+# Env vars and secrets on the Cloud Run service are set once in the console (secrets
+# through Secret Manager); each deploy keeps them. The server needs DATABASE_URL
+# (sleekboard_app, over Cloud SQL's /cloudsql/ socket or with sslmode=require),
+# OWNER_EMAIL and CLIENT_URL, plus TOGETHER_API_KEY, EXA_API_KEY and the Gmail ones
+# for those features. Migrations aren't run by this workflow: they need
+# sleekboard_owner (MIGRATE_DATABASE_URL), run before a deploy that changes tables.
+
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  REPOSITORY: sleekboard
+  SERVICE: sleekboard-server
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/sleekboard/server:${{ github.sha }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # Keyless login: GitHub proves who it is to Google, no JSON key stored.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Let Docker push to Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build image
+        run: docker build -t "$IMAGE" .
+
+      - name: Push image
+        run: docker push "$IMAGE"
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE }}
+          region: ${{ env.REGION }}
+          image: ${{ env.IMAGE }}
+
+      - name: Print service URL
+        run: |
+          gcloud run services describe "$SERVICE" \
+            --region "$REGION" \
+            --format 'value(status.url)'
