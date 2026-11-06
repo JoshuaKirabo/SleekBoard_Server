@@ -69,6 +69,6 @@ export class NoteRun
     result()
       {
         if(!this.save.notes) throw new Error("The note writer finished without saving any notes.");
-        return { contact: String(this.contact._id ?? this.contact.id), notes: this.save.notes };
+        return { contact: String(this.contact.id), notes: this.save.notes };
       }
   }

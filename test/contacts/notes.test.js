@@ -50,7 +50,7 @@ test("a note may only say you applied once you have", async () =>
   });
 
 const appleJob = { id: "job-1", company: "Apple", role: "iOS Engineer Intern", location: "Cupertino, CA", link: "jobs.apple.com/en-us/details/1", status: "saved" };
-const sam = { _id: "contact-1", name: "Sam Rivera", title: "Technical Recruiter", type: "recruiter", source: "run", jobs: ["job-1"] };
+const sam = { id: "contact-1", name: "Sam Rivera", title: "Technical Recruiter", type: "recruiter", source: "run", jobs: ["job-1"] };
 
 const noteTaskWith = ({ job = appleJob, contact = sam, fetchPage = async () => ({ html: "", url: null }) } = {}) =>
   {

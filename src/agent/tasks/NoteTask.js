@@ -28,7 +28,7 @@ export class NoteTask
         const contact = await this.contacts.find(id);
         if(!contact) throw failure(StatusCodes.NOT_FOUND, "That contact doesn't exist.");
         if(!contact.jobs.some((job) => String(job) === String(jobId))) throw failure(StatusCodes.CONFLICT, `${contact.name} isn't saved for this job.`);
-        return { contact: contact._id };
+        return { contact: contact.id };
       }
 
     // The job and the contact are read when the run starts, so edits made while it waited still count.

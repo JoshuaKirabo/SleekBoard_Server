@@ -1,5 +1,5 @@
-import { Contact } from "../../models/contact.model.js";
-import { Connection } from "../../models/connection.model.js";
+import { prisma } from "../../config/prisma.js";
+import { owner } from "../users/index.js";
 import { jobStore } from "../jobs/index.js";
 import { ContactBook } from "./ContactBook.js";
 import { ConnectionBook } from "./ConnectionBook.js";
@@ -9,8 +9,8 @@ import { WarmLeads } from "./WarmLeads.js";
 
 // The real contact pieces, built once, the way agent/container.js builds the agent's. Tests build their own.
 
-export const contactBook = new ContactBook({ Contact });
-export const connectionBook = new ConnectionBook({ Connection });
+export const contactBook = new ContactBook({ db: prisma, userId: () => owner.id() });
+export const connectionBook = new ConnectionBook({ db: prisma, userId: () => owner.id() });
 export const connectionsCsv = new ConnectionsCsv();
 export const jobCard = new JobCard({ jobs: jobStore });
 export const warmLeads = new WarmLeads({ book: contactBook, connections: connectionBook, card: jobCard });

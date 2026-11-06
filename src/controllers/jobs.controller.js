@@ -1,6 +1,5 @@
 import { StatusCodes } from "http-status-codes";
 import { readJob } from "../services/jobReader.js";
-import { contactBook } from "../services/contacts/index.js";
 import { jobFields, jobStore, laneHistory } from "../services/jobs/index.js";
 import { replyDesk } from "../services/email/index.js";
 
@@ -38,12 +37,12 @@ export const updateJob = async (req, res) =>
 // A lane change from the board, or its undo.
 const moveLane = (job, status, undo) => undo ? laneHistory.undo(job, status) : laneHistory.move(job, status, "board");
 
-// DELETE /api/jobs/:id. The job comes off any contacts saved for it; the people stay, for warm leads later.
+// DELETE /api/jobs/:id. The job comes off any contacts saved for it (Postgres deletes the links with it); the people
+// stay, for warm leads later.
 export const deleteJob = async (req, res) =>
   {
     const job = await jobStore.remove(req.params.id);
     if(!job) return missing(res);
-    await contactBook.dropJob(job.id);
     res.status(StatusCodes.NO_CONTENT).end();
   };
 

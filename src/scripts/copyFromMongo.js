@@ -14,6 +14,9 @@ import { prisma } from "../config/prisma.js";
 // --fresh deletes rows, so it only runs when --confirm names the database it's pointed at, every time. Even
 // localhost: Cloud SQL's proxy makes the real database look like localhost too.
 //
+// Jobs, contacts and connections live in Postgres now (2026-11-06), so Atlas only has older copies of them. --fresh
+// would throw away everything changed since and bring those back.
+//
 // Every record keeps its Mongo id as its Postgres id, so links between records, and ids saved inside a run's result,
 // still point at the right thing. New records get uuids. Both are just text to the app.
 //
@@ -347,7 +350,7 @@ if(!ownerEmail.includes("@"))
 const database = new DatabaseUrl(process.env.DATABASE_URL);
 if(fresh && !database.isConfirmedBy(argument("--confirm")))
   {
-    console.error(`--fresh deletes ${ownerEmail}'s rows in ${database.label()}. If that's the one you mean, add --confirm ${database.label()}`);
+    console.error(`--fresh deletes ${ownerEmail}'s rows in ${database.label()} and puts Atlas' copies back. Jobs and contacts live in Postgres now, so anything changed since the switch would be lost. If that's what you mean, add --confirm ${database.label()}`);
     process.exit(1);
   }
 

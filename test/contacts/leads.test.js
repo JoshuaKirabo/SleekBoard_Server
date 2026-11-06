@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { WarmLeads } from "../../src/services/contacts/WarmLeads.js";
 import { ContactBook } from "../../src/services/contacts/ContactBook.js";
 
-// A ContactBook whose reads come from lists instead of Mongo.
+// A ContactBook whose reads come from lists instead of Postgres.
 const bookWith = ({ saved = [], atCompany = [] }) =>
   {
-    const book = new ContactBook({ Contact: null });
+    const book = new ContactBook({ db: null });
     book.forJob = async () => saved;
     book.atCompany = async () => atCompany;
     return book;

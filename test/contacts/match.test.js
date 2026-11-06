@@ -91,7 +91,7 @@ test("a LinkedIn export is read past its notes, by column name", () =>
 
 test("saved contacts key on name and company the way career-ops does", () =>
   {
-    const book = new ContactBook({ Contact: null });
+    const book = new ContactBook({ db: null });
     assert.equal(book.keyOf("Jane Doe", "Datavant"), "janedoe::datavant");
     assert.equal(book.keyOf("Jane Doe", "ACME, Inc"), book.keyOf("jane doe", "Acme Inc."));
     assert.equal(book.keyOf("?", "?"), "::");

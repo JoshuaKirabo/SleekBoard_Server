@@ -1,4 +1,5 @@
 import { CompanyMatch } from "./CompanyMatch.js";
+import { ContactFields } from "./ContactFields.js";
 
 // The most connections one upload keeps. A big LinkedIn network is a few thousand; this is far past that.
 const MAX_CONNECTIONS = 30_000;
@@ -7,40 +8,63 @@ const MAX_CONNECTIONS = 30_000;
 // know someone (career-ops' joinConnections order).
 const TIER_RANK = { exact: 0, strong: 1 };
 
-// Every read and write of your LinkedIn connections. It gets the Mongoose model handed in.
+// Rows per insert. Postgres takes at most 65,535 values in one statement, and a connection is about ten.
+const BATCH = 2000;
+
+// Every read and write of your LinkedIn connections, in Postgres, limited to one person's like ContactBook.
 export class ConnectionBook
   {
-    constructor({ Connection, match = new CompanyMatch() })
+    constructor({ db, userId, match = new CompanyMatch(), fields = new ContactFields() })
       {
-        this.Connection = Connection;
+        this.db = db;
+        this.userId = userId;
         this.match = match;
+        this.fields = fields;
       }
 
-    // Swaps the whole list for a new upload. Each connection's company is split into words once, here.
+    // Swaps the whole list for a new upload, in one transaction, so a failed upload leaves the old list. Each
+    // connection's company is split into words once, here.
     async replace(connections)
       {
         if(connections.length > MAX_CONNECTIONS) throw Object.assign(new Error(`That's ${connections.length.toLocaleString("en-US")} connections. The most it takes is ${MAX_CONNECTIONS.toLocaleString("en-US")}.`), { status: 413 });
-        const rows = connections.map((connection) => ({ ...connection, tokens: this.match.tokensOf(connection.company) }));
-        await this.Connection.deleteMany({});
-        if(rows.length) await this.Connection.insertMany(rows, { ordered: false });
+        const userId = await this.userId();
+        const rows = connections.map((connection) => this.rowOf(connection, userId)).filter(Boolean);
+        await this.db.$transaction(async (tx) =>
+          {
+            await tx.connection.deleteMany({ where: { userId } });
+            for(let at = 0; at < rows.length; at += BATCH)
+              await tx.connection.createMany({ data: rows.slice(at, at + BATCH) });
+          }, { timeout: 120000 });
         return this.summary();
       }
 
-    clear()
+    // A connection as it's saved, or null for one that can't be kept.
+    rowOf(connection, userId)
       {
-        return this.Connection.deleteMany({});
+        const clean = this.fields.forConnection(connection);
+        if(!clean) return null;
+        const tokens = this.match.tokensOf(clean.company);
+        return { ...clean, userId, tokensAll: tokens.all, tokensDistinctive: tokens.distinctive, tokensKey: tokens.key || null };
+      }
+
+    async clear()
+      {
+        await this.db.connection.deleteMany({ where: { userId: await this.userId() } });
       }
 
     // How many are saved and when they were uploaded, so the card can say whether there's anything to look in.
     async summary()
       {
-        const [count, newest] = await Promise.all([this.Connection.countDocuments(), this.Connection.findOne().sort({ createdAt: -1 }).select("createdAt")]);
+        const where = { userId: await this.userId() };
+        const [count, newest] = await Promise.all([this.db.connection.count({ where }), this.db.connection.findFirst({ where, orderBy: { createdAt: "desc" }, select: { createdAt: true } })]);
         return { count, importedAt: newest?.createdAt || null };
       }
 
-    find(id)
+    async find(id)
       {
-        return this.Connection.findById(id);
+        if(!id) return null;
+        const row = await this.db.connection.findFirst({ where: { id: String(id), userId: await this.userId() } });
+        return row && this.shapeOf(row);
       }
 
     // LinkedIn's own search for 2nd-degree connections at the company, for you to open yourself.
@@ -56,12 +80,24 @@ export class ConnectionBook
       {
         const target = this.match.tokensOf(company);
         if(!target.key) return [];
-        const candidates = await this.Connection.find({ $or: [{ "tokens.key": target.key }, { "tokens.distinctive": { $in: target.distinctive } }] }).limit(500);
+        const sameCompany = [{ tokensKey: target.key }, ...(target.distinctive.length ? [{ tokensDistinctive: { hasSome: target.distinctive } }] : [])];
+        const candidates = await this.db.connection.findMany({ where: { userId: await this.userId(), OR: sameCompany }, take: 500 });
         return candidates
-          .map((connection) => ({ connection, tier: this.match.tier(connection.tokens, target) }))
+          .map((row) => ({ row, tier: this.match.tier(this.tokensOf(row), target) }))
           .filter(({ tier }) => tier === "exact" || tier === "strong")
-          .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || b.connection.connectedOn.localeCompare(a.connection.connectedOn) || a.connection.name.localeCompare(b.connection.name))
+          .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || b.row.connectedOn.localeCompare(a.row.connectedOn) || a.row.name.localeCompare(b.row.name))
           .slice(0, 20)
-          .map(({ connection, tier }) => ({ ...connection.toJSON(), match: tier }));
+          .map(({ row, tier }) => ({ ...this.shapeOf(row), match: tier }));
+      }
+
+    tokensOf(row)
+      {
+        return { all: row.tokensAll, distinctive: row.tokensDistinctive, key: row.tokensKey || "" };
+      }
+
+    shapeOf(row)
+      {
+        const { userId, tokensAll, tokensDistinctive, tokensKey, ...connection } = row;
+        return connection;
       }
   }
