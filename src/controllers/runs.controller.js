@@ -52,7 +52,7 @@ export const attachRun = async (req, res) =>
     if(!jobId) return res.status(StatusCodes.BAD_REQUEST).json({ message: "Send the job's id." });
     const job = await jobStore.find(jobId);
     if(!job) return res.status(StatusCodes.NOT_FOUND).json({ message: "That job doesn't exist." });
-    const { matchedCount } = await runStore.attach(req.params.id, job.id);
-    if(!matchedCount) return res.status(StatusCodes.CONFLICT).json({ message: "Only a Fill in run with no card yet can be given one." });
+    const attached = await runStore.attach(req.params.id, job.id);
+    if(!attached) return res.status(StatusCodes.CONFLICT).json({ message: "Only a Fill in run with no card yet can be given one." });
     res.json(await runStore.find(req.params.id));
   };

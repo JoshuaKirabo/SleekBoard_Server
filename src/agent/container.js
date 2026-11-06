@@ -1,5 +1,6 @@
 import OpenAI from "openai";
-import { Run } from "../models/run.model.js";
+import { prisma } from "../config/prisma.js";
+import { owner } from "../services/users/index.js";
 import { MODELS } from "./models.js";
 import { Model } from "./Model.js";
 import { ModelLadder } from "./ModelLadder.js";
@@ -43,7 +44,7 @@ import { GmailConnect } from "../services/email/GmailConnect.js";
 
 const TOGETHER_URL = "https://api.together.xyz/v1";
 
-export const runStore = new RunStore(Run);
+export const runStore = new RunStore({ db: prisma, userId: () => owner.id() });
 export const ladder = new ModelLadder(MODELS.map((settings) => new Model(settings)));
 
 // Built when a run starts, not when the server boots, so the server still starts without a key and only AI runs
