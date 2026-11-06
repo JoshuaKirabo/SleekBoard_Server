@@ -3,10 +3,11 @@ import mongoose from "mongoose";
 import { connectDB } from "../config/db.js";
 import { prisma } from "../config/prisma.js";
 
-// Copies everything in Mongo (Atlas) into Postgres, once, then checks every record came across the same.
+// Copies everything in Mongo (Atlas) into Postgres, once, then checks every record came across the same. Mongo has
+// no accounts, so every record goes to one owner, made from the email you give if they don't exist yet.
 //
-//   npm run db:copy              copies, but only into an empty Postgres
-//   npm run db:copy -- --fresh   empties SleekBoard's Postgres tables first, then copies
+//   npm run db:copy -- --owner you@example.com           copies, but only if that owner has nothing yet
+//   npm run db:copy -- --owner you@example.com --fresh   empties that owner's rows first, then copies
 //
 // Every record keeps its Mongo id as its Postgres id, so links between records, and ids saved inside a run's result,
 // still point at the right thing. New records get uuids. Both are just text to the app.
@@ -14,10 +15,11 @@ import { prisma } from "../config/prisma.js";
 // It all goes in one transaction: if anything fails, Postgres is left the way it was.
 class MongoCopy
   {
-    constructor(mongo, db)
+    constructor(mongo, db, ownerEmail)
       {
         this.mongo = mongo;
         this.db = db;
+        this.ownerEmail = ownerEmail;
         this.source = {};
         this.notes = [];
       }
@@ -25,11 +27,12 @@ class MongoCopy
     async run(fresh)
       {
         await this.read();
-        if(!fresh) await this.refuseIfFull();
 
         await this.db.$transaction(async (tx) =>
           {
+            this.userId = await this.owner(tx);
             if(fresh) await this.empty(tx);
+            else await this.refuseIfFull(tx);
             await this.copyJobs(tx);
             await this.copyContacts(tx);
             await this.copyConnections(tx);
@@ -52,27 +55,44 @@ class MongoCopy
         this.contactIds = new Set(this.source.contacts.map((contact) => idOf(contact)));
       }
 
-    async refuseIfFull()
+    // The person everything gets copied to. Emails are kept lowercase, the same as sign-in will look them up.
+    async owner(tx)
       {
-        const [jobs, contacts, runs] = await Promise.all([this.db.job.count(), this.db.contact.count(), this.db.run.count()]);
-        if(jobs + contacts + runs > 0) throw new Error("Postgres already has data. Run with --fresh to empty it and copy again.");
+        const email = this.ownerEmail.trim().toLowerCase();
+        const user = await tx.user.upsert({ where: { email }, update: {}, create: { email } });
+        return user.id;
       }
 
-    // Deleting the parents takes the child tables (moves, steps, links) with them. It runs inside the copy's
-    // transaction, so a copy that fails puts the old rows back too.
+    async refuseIfFull(tx)
+      {
+        const where = { userId: this.userId };
+        const counts = await Promise.all([tx.job.count({ where }), tx.contact.count({ where }), tx.run.count({ where }), tx.mailbox.count({ where })]);
+        if(counts.some((count) => count > 0)) throw new Error(`${this.ownerEmail} already has data in Postgres. Add --fresh to empty it and copy again.`);
+      }
+
+    // Only the owner's rows. Runs go first because Postgres won't delete a job or contact a run still points at;
+    // deleting the rest takes their moves, steps and links with them. It runs inside the copy's transaction, so a
+    // copy that fails puts the old rows back too.
     async empty(tx)
       {
-        await tx.run.deleteMany();
-        await tx.contact.deleteMany();
-        await tx.job.deleteMany();
-        await tx.connection.deleteMany();
-        await tx.mailbox.deleteMany();
+        const where = { userId: this.userId };
+        await tx.run.deleteMany({ where });
+        await tx.contact.deleteMany({ where });
+        await tx.job.deleteMany({ where });
+        await tx.connection.deleteMany({ where });
+        await tx.mailbox.deleteMany({ where });
+      }
+
+    // A row with its owner added.
+    owned(row)
+      {
+        return { ...row, userId: this.userId };
       }
 
     async copyJobs(tx)
       {
         const jobs = this.source.jobs;
-        await tx.job.createMany({ data: jobs.map((job) => jobRow(job)) });
+        await tx.job.createMany({ data: jobs.map((job) => this.owned(jobRow(job))) });
         await tx.jobMove.createMany({ data: jobs.flatMap((job) => (job.moves || []).map((move) => moveRow(job, move))) });
         const suggested = jobs.filter((job) => job.replySuggestion);
         await tx.replySuggestion.createMany({ data: suggested.map((job) => suggestionRow(job)) });
@@ -81,7 +101,7 @@ class MongoCopy
     async copyContacts(tx)
       {
         const contacts = this.source.contacts;
-        await tx.contact.createMany({ data: contacts.map((contact) => contactRow(contact)) });
+        await tx.contact.createMany({ data: contacts.map((contact) => this.owned(contactRow(contact))) });
         await tx.contactJob.createMany({ data: contacts.flatMap((contact) => this.contactLinks(contact)) });
       }
 
@@ -89,7 +109,7 @@ class MongoCopy
     // can line them up with what Postgres sends back.
     contactLinks(contact)
       {
-        const links = (contact.jobs || []).map((job) => ({ contactId: idOf(contact), jobId: String(job) })).sort((a, b) => a.jobId.localeCompare(b.jobId));
+        const links = (contact.jobs || []).map((job) => this.owned({ contactId: idOf(contact), jobId: String(job) })).sort((a, b) => a.jobId.localeCompare(b.jobId));
         const kept = links.filter((link) => this.jobIds.has(link.jobId));
         if(kept.length < links.length) this.notes.push(`${contact.name}: ${links.length - kept.length} link(s) to deleted jobs left out`);
         return kept;
@@ -97,7 +117,7 @@ class MongoCopy
 
     async copyConnections(tx)
       {
-        await tx.connection.createMany({ data: this.source.connections.map((connection) => connectionRow(connection)) });
+        await tx.connection.createMany({ data: this.source.connections.map((connection) => this.owned(connectionRow(connection))) });
       }
 
     async copyRuns(tx)
@@ -118,13 +138,13 @@ class MongoCopy
         const keepContact = contactId && this.contactIds.has(contactId);
         if(jobId && !keepJob) this.notes.push(`run ${idOf(run)}: its job was deleted, so job is empty`);
         if(contactId && !keepContact) this.notes.push(`run ${idOf(run)}: its contact was deleted, so input contact is empty`);
-        return { ...runFields(run), jobId: keepJob ? jobId : null, inputContactId: keepContact ? contactId : null };
+        return this.owned({ ...runFields(run), jobId: keepJob ? jobId : null, inputContactId: keepContact ? contactId : null });
       }
 
     async copyMailboxes(tx)
       {
         const mailboxes = this.source.mailboxes;
-        await tx.mailbox.createMany({ data: mailboxes.map((mailbox) => mailboxRow(mailbox)) });
+        await tx.mailbox.createMany({ data: mailboxes.map((mailbox) => this.owned(mailboxRow(mailbox))) });
         await tx.mailboxResting.createMany({ data: mailboxes.flatMap((mailbox) => (mailbox.resting || []).map((rest) => restingRow(mailbox, rest))) });
       }
 
@@ -151,18 +171,19 @@ class MongoCopy
           };
 
         const order = { orderBy: { id: "asc" } };
-        compare("job", await this.db.job.findMany({ include: { moves: order, replySuggestion: true } }), this.source.jobs, (job) => ({ ...jobRow(job), moves: (job.moves || []).map((move) => ({ ...moveRow(job, move) })), replySuggestion: job.replySuggestion ? suggestionRow(job) : null }));
-        compare("contact", await this.db.contact.findMany({ include: { jobs: { orderBy: { jobId: "asc" } } } }), this.source.contacts, (contact) => ({ ...contactRow(contact), jobs: this.contactLinks(contact) }));
-        compare("connection", await this.db.connection.findMany(), this.source.connections, (connection) => connectionRow(connection));
-        compare("run", await this.db.run.findMany({ include: { steps: order, usage: order } }), this.source.runs, (run) => ({ ...this.runRow(run), steps: (run.steps || []).map((step) => stepRow(run, step)), usage: (run.usage || []).map((usage) => usageRow(run, usage)) }));
-        compare("mailbox", await this.db.mailbox.findMany({ include: { resting: { orderBy: { at: "asc" } } } }), this.source.mailboxes, (mailbox) => ({ ...mailboxRow(mailbox), resting: (mailbox.resting || []).map((rest) => restingRow(mailbox, rest)) }));
+        const mine = { userId: this.userId };
+        compare("job", await this.db.job.findMany({ where: mine, include: { moves: order, replySuggestion: true } }), this.source.jobs, (job) => ({ ...this.owned(jobRow(job)), moves: (job.moves || []).map((move) => ({ ...moveRow(job, move) })), replySuggestion: job.replySuggestion ? suggestionRow(job) : null }));
+        compare("contact", await this.db.contact.findMany({ where: mine, include: { jobs: { orderBy: { jobId: "asc" } } } }), this.source.contacts, (contact) => ({ ...this.owned(contactRow(contact)), jobs: this.contactLinks(contact) }));
+        compare("connection", await this.db.connection.findMany({ where: mine }), this.source.connections, (connection) => this.owned(connectionRow(connection)));
+        compare("run", await this.db.run.findMany({ where: mine, include: { steps: order, usage: order } }), this.source.runs, (run) => ({ ...this.runRow(run), steps: (run.steps || []).map((step) => stepRow(run, step)), usage: (run.usage || []).map((usage) => usageRow(run, usage)) }));
+        compare("mailbox", await this.db.mailbox.findMany({ where: mine, include: { resting: { orderBy: { at: "asc" } } } }), this.source.mailboxes, (mailbox) => ({ ...this.owned(mailboxRow(mailbox)), resting: (mailbox.resting || []).map((rest) => restingRow(mailbox, rest)) }));
         return problems;
       }
 
     report(problems)
       {
         const counts = Object.entries(this.source).map(([name, docs]) => `${docs.length} ${name}`).join(", ");
-        console.log(`Copied ${counts}.`);
+        console.log(`Copied ${counts} to ${this.ownerEmail}.`);
         for(const note of new Set(this.notes)) console.log(`  note: ${note}`);
         if(problems.length === 0) console.log("Checked every record field by field: all match.");
         for(const problem of problems) console.error(`  MISMATCH ${problem}`);
@@ -302,11 +323,25 @@ const same = (actual, wanted) =>
 
 const show = (value) => JSON.stringify(value)?.slice(0, 80);
 
+// The value after a flag, like the email after --owner.
+const argument = (flag) =>
+  {
+    const at = process.argv.indexOf(flag);
+    return at === -1 ? "" : process.argv[at + 1] || "";
+  };
+
 const fresh = process.argv.includes("--fresh");
+const ownerEmail = argument("--owner");
+if(!ownerEmail.includes("@"))
+  {
+    console.error("Say who owns the copied data: npm run db:copy -- --owner you@example.com");
+    process.exit(1);
+  }
+
 await connectDB(process.env.MONGODB_URI || process.env.MONGO_URI);
 try
   {
-    const ok = await new MongoCopy(mongoose.connection.db, prisma).run(fresh);
+    const ok = await new MongoCopy(mongoose.connection.db, prisma, ownerEmail).run(fresh);
     process.exitCode = ok ? 0 : 1;
   }
 catch(error)

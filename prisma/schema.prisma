@@ -4,6 +4,10 @@
 // Tables and columns are snake_case in Postgres and camelCase in code. Lists that lived inside a Mongo record (a
 // job's moves, a contact's jobs, a run's steps) are their own tables now, so the database keeps the links right.
 //
+// Every top-level row has an owner (userId), and every query has to ask for the signed-in user's rows. Links between
+// rows (a contact's jobs, a run's job and contact) carry the owner too, so Postgres refuses a link from one person's
+// row to someone else's, even if the code forgets to check.
+//
 // After changing this file: npm run db:migrate
 
 generator client {
@@ -13,6 +17,29 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// People
+// ---------------------------------------------------------------------------------------------------------------
+
+// Someone who can sign in. Deleting one deletes everything they own.
+model User {
+  id        String   @id @default(uuid())
+  // Always lowercase (a check in the migration enforces it), so Sam@x.com and sam@x.com can't be two people. Empty
+  // when the only login is one that hides its email, like some GitHub accounts.
+  email     String?  @unique @db.VarChar(320)
+  name      String   @default("") @db.VarChar(200)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  jobs        Job[]
+  contacts    Contact[]
+  connections Connection[]
+  runs        Run[]
+  mailboxes   Mailbox[]
+
+  @@map("users")
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -41,6 +68,7 @@ enum MoveSource {
 
 model Job {
   id           String @id @default(uuid())
+  userId       String @map("user_id")
   company      String @db.VarChar(120)
   role         String @db.VarChar(200)
   location     String @default("") @db.VarChar(120)
@@ -61,11 +89,15 @@ model Job {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   moves           JobMove[]
   replySuggestion ReplySuggestion?
   contacts        ContactJob[]
   runs            Run[]
 
+  // Lets links from other tables name the job and its owner together.
+  @@unique([id, userId])
+  @@index([userId])
   @@map("jobs")
 }
 
@@ -123,11 +155,12 @@ enum ContactSource {
   @@map("contact_source")
 }
 
-// The people you've said yes to. One per person per company: key is both, folded (see TextKey), so saving Sam at
-// Apple again updates Sam instead of adding a second Sam.
+// The people you've said yes to. One per person per company for each user: key is both, folded (see TextKey), so
+// saving Sam at Apple again updates Sam instead of adding a second Sam.
 model Contact {
   id           String        @id @default(uuid())
-  key          String        @unique
+  userId       String        @map("user_id")
+  key          String
   name         String        @db.VarChar(200)
   company      String        @db.VarChar(120)
   // The company folded, and its distinctive words, for the warm-lead lookup (see CompanyMatch).
@@ -148,21 +181,26 @@ model Contact {
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
 
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   jobs     ContactJob[]
   noteRuns Run[]
 
-  @@index([companyKey])
+  @@unique([userId, key])
+  @@unique([id, userId])
+  @@index([userId, companyKey])
   @@index([companyWords], type: Gin)
   @@map("contacts")
 }
 
 // Which jobs a contact is saved for. Deleting a job takes it off its contacts; the people stay, for warm leads later.
+// Both links include the owner, so a contact can only be saved for a job of the same person.
 model ContactJob {
   contactId String @map("contact_id")
   jobId     String @map("job_id")
+  userId    String @map("user_id")
 
-  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  job     Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId, userId], references: [id, userId], onDelete: Cascade)
+  job     Job     @relation(fields: [jobId, userId], references: [id, userId], onDelete: Cascade)
 
   @@id([contactId, jobId])
   @@index([jobId])
@@ -173,6 +211,7 @@ model ContactJob {
 // of your saved contacts until you pick one for a job.
 model Connection {
   id                String   @id @default(uuid())
+  userId            String   @map("user_id")
   name              String   @db.VarChar(200)
   company           String   @db.VarChar(200)
   title             String   @default("") @db.VarChar(300)
@@ -187,7 +226,9 @@ model Connection {
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
-  @@index([tokensKey])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, tokensKey])
   @@index([tokensDistinctive], type: Gin)
   @@map("connections")
 }
@@ -228,8 +269,10 @@ enum StepType {
 
 model Run {
   id             String    @id @default(uuid())
+  userId         String    @map("user_id")
   // Fill and email runs can have no job. Deleting a job keeps its runs, with the job emptied, so today's spending
-  // still counts toward the cap.
+  // still counts toward the cap. Postgres refuses to delete a job that runs still point at, so the delete has to
+  // empty their job first, in the same transaction. Same for a note run's contact.
   jobId          String?   @map("job_id")
   kind           RunKind
   status         RunStatus @default(queued)
@@ -247,14 +290,17 @@ model Run {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  job          Job?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  inputContact Contact?   @relation(fields: [inputContactId], references: [id], onDelete: SetNull)
+  // Postgres can't empty only job_id when a job is deleted (it would empty the owner too), hence NoAction.
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job          Job?       @relation(fields: [jobId, userId], references: [id, userId], onDelete: NoAction)
+  inputContact Contact?   @relation(fields: [inputContactId, userId], references: [id, userId], onDelete: NoAction)
   steps        RunStep[]
   usage        RunUsage[]
 
   @@index([jobId])
   @@index([status])
   @@index([createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
   @@map("runs")
 }
 
@@ -293,10 +339,12 @@ model RunUsage {
 // Gmail
 // ---------------------------------------------------------------------------------------------------------------
 
-// One connected inbox, its Gmail login, and what the email check remembers about it. "me" until there are accounts.
+// One connected inbox, its Gmail login, and what the email check remembers about it. key is "me" for now; one
+// mailbox per key per user.
 model Mailbox {
   id          String    @id @default(uuid())
-  key         String    @unique
+  userId      String    @map("user_id")
+  key         String
   // The last 500 message ids already handled, oldest first, so nothing is read twice.
   processed   String[]
   // False until the first check has read back 90 days. After that a check reads 3.
@@ -312,8 +360,10 @@ model Mailbox {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   resting MailboxResting[]
 
+  @@unique([userId, key])
   @@map("mailboxes")
 }
 
