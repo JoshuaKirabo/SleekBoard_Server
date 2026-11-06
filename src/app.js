@@ -5,8 +5,17 @@ import { corsOrigins } from "./config/corsOrigins.js";
 import { authSettings, sessionMiddleware, passport } from "./services/auth/index.js";
 import { notFound } from "./middleware/notFound.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import { OriginLock } from "./middleware/OriginLock.js";
 
 const app = express();
+
+// First of all: only requests that came through Cloudflare (it adds X-Origin-Secret; see OriginLock). Ahead of CORS
+// and body parsing so a turned-away one costs next to nothing. Cloudflare adds the header to CORS preflights and to
+// Google's sign-in callback too, since both come in through the public domain. Cloud Run's default startup probe only
+// opens a TCP connection, so it never meets this; an HTTP probe or uptime check would have to send the header.
+// No secret (this Mac, or ORIGIN_LOCK=off) means no lock.
+const originSecret = authSettings.originSecret();
+if(originSecret) app.use(new OriginLock({ secret: originSecret }).guard());
 
 // Only the board's own origins (CLIENT_URL) get through; with none set, no other site does. See corsOrigins.js.
 app.use(cors({ origin: corsOrigins(process.env.CLIENT_URL), credentials: true }));

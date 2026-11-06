@@ -6,6 +6,8 @@
 //                               has to match a redirect URI on the client in Google Cloud.
 //   CLIENT_URL                  the board. You land on its first origin after signing in.
 //   TRUST_PROXY_HOPS            how many proxies sit in front of the server (see trustProxyHops below).
+//   ORIGIN_SECRET               what Cloudflare's rule puts in X-Origin-Secret on every request (see originSecret).
+//   ORIGIN_LOCK                 "off" serves requests without it. Only for a first deploy before Cloudflare is set up.
 //
 // Cloud Run sets K_SERVICE on its own, which is how this knows it's sitting behind Google's proxy.
 const MIN_SECRET = 32;
@@ -69,6 +71,28 @@ export class AuthSettings
         return Number(raw);
       }
 
+    // The secret every request has to carry (OriginLock), or "" when the lock is off. A missing one on Cloud Run stops
+    // the start rather than leave the run.app address open to anyone who finds it, unless ORIGIN_LOCK=off says so on
+    // purpose. Off Cloud Run with none set, the lock is off so this Mac works as it is. Trimmed, since a secret saved
+    // with `echo` ends in a newline and the header's value never does.
+    originSecret()
+      {
+        if(this.isOriginLockOff()) return "";
+        const secret = (this.env.ORIGIN_SECRET || "").trim();
+        if(!secret && this.isBehindProxy()) throw new Error("ORIGIN_SECRET has to be set on Cloud Run: it's how the server knows a request came through Cloudflare. ORIGIN_LOCK=off skips it until Cloudflare is set up.");
+        if(secret && secret.length < MIN_SECRET) throw new Error(`ORIGIN_SECRET is too short. It needs ${MIN_SECRET}+ characters.`);
+        return secret;
+      }
+
+    // Only "off" (or nothing) is taken, so a typo like "of" or "false" stops the start instead of guessing what was
+    // meant.
+    isOriginLockOff()
+      {
+        const value = (this.env.ORIGIN_LOCK || "").trim();
+        if(value && value !== "off") throw new Error(`ORIGIN_LOCK only takes "off". It's "${value}".`);
+        return value === "off";
+      }
+
     // Every new session's cookie, Google sign-in's included: 30 days. The email + password form sets its own below.
     sessionMs()
       {
@@ -122,5 +146,9 @@ export class AuthSettings
         // app.js reads the hop count as it loads, so a bad one stops the start there first. 0 on Cloud Run would make
         // every visitor Google's front end: one shared address for the sign-in limits, and no https, so no cookie.
         if(this.isBehindProxy() && this.trustProxyHops() === 0) throw new Error("TRUST_PROXY_HOPS can't be 0 on Cloud Run: Google's front end is always one hop.");
+        // A missing or short ORIGIN_SECRET already stopped the start in app.js, where the lock is built. What's left is
+        // the lock switched off on purpose while trusting two hops: anyone reaching run.app straight would fill
+        // Cloudflare's slot in X-Forwarded-For themselves and pick their own req.ip.
+        if(this.isBehindProxy() && this.isOriginLockOff() && this.trustProxyHops() >= 2) throw new Error("TRUST_PROXY_HOPS above 1 needs the origin lock on (ORIGIN_SECRET, without ORIGIN_LOCK=off), or anyone skipping Cloudflare could fake their address.");
       }
   }

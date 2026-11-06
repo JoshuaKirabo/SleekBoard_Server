@@ -39,3 +39,20 @@ src/
   models/          mongoose schemas
   services/        work that isn't a request handler, like reading a job page
 ```
+
+## Behind Cloudflare (Cloud Run)
+
+Cloud Run's `run.app` address stays public, so the server only answers requests carrying a secret header that
+Cloudflare adds (`src/middleware/OriginLock.js`). Anything else gets a bare 403 before CORS or body parsing.
+
+1. Make a secret: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`.
+2. Cloudflare dashboard, Rules > Overview > Create rule > Request Header Transform Rule: "All incoming requests",
+   Modify request header > Set static, header name `X-Origin-Secret`, value the secret, Deploy. (Set static
+   overwrites any `X-Origin-Secret` a visitor sends.)
+3. On the Cloud Run service: `ORIGIN_SECRET` = the same secret (through Secret Manager), and `TRUST_PROXY_HOPS=2`
+   (Cloudflare plus Google's front end).
+
+On Cloud Run the server won't start without `ORIGIN_SECRET` (32+ characters). For a first deploy before Cloudflare
+exists, set `ORIGIN_LOCK=off` and leave `TRUST_PROXY_HOPS` unset (1); the server won't start with the lock off and 2
+hops. Off Cloud Run with no secret there's no lock. Cloud Run's default startup probe is TCP, so it isn't affected; an HTTP
+probe or uptime check would have to send the header too.
