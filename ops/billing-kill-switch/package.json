@@ -1,0 +1,19 @@
+{
+  "name": "sleekboard-billing-kill-switch",
+  "version": "1.0.0",
+  "description": "Turns billing off for the SleekBoard Google Cloud project once its budget is spent (Google's disable-billing-with-notifications function)",
+  "main": "index.js",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@google-cloud/billing": "^6.2.0",
+    "@google-cloud/functions-framework": "^5.0.5"
+  }
+}

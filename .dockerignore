@@ -12,3 +12,5 @@ npm-debug.log*
 README.md
 Dockerfile
 .dockerignore
+# The billing kill switch is its own Cloud Run function, deployed on its own (ops/billing-kill-switch/README.md).
+ops

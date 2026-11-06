@@ -56,3 +56,8 @@ On Cloud Run the server won't start without `ORIGIN_SECRET` (32+ characters). Fo
 exists, set `ORIGIN_LOCK=off` and leave `TRUST_PROXY_HOPS` unset (1); the server won't start with the lock off and 2
 hops. Off Cloud Run with no secret there's no lock. Cloud Run's default startup probe is TCP, so it isn't affected; an HTTP
 probe or uptime check would have to send the header too.
+
+## Billing kill switch
+
+A Cloud Run function, kept apart from the server, that turns billing off for the project once the month's budget is
+spent. What it does and doesn't do, and how to set it up: `ops/billing-kill-switch/README.md`.

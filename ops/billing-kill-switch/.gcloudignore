@@ -1,0 +1,6 @@
+# What `gcloud functions deploy --source=.` leaves out of the upload. Cloud Build installs the packages itself from
+# package-lock.json, and the tests and notes aren't needed to run.
+.gcloudignore
+node_modules/
+test/
+README.md
