@@ -82,7 +82,7 @@ export class AuthSettings
       {
         if(!this.secret()) throw new Error("SESSION_SECRET is missing from .env. Make one with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"");
         if(this.secret().length < MIN_SECRET) throw new Error(`SESSION_SECRET is too short. It needs ${MIN_SECRET}+ characters.`);
-        // Without CLIENT_URL the API lets any website's requests through (see app.js), so a deploy must name the board.
-        if(this.isBehindProxy() && !this.env.CLIENT_URL) throw new Error("CLIENT_URL has to be set on Cloud Run, so only the board's own site gets through.");
+        // Without CLIENT_URL a deploy would send you to this Mac's localhost after signing in, so it must name the board.
+        if(this.isBehindProxy() && !this.env.CLIENT_URL) throw new Error("CLIENT_URL has to be set on Cloud Run: it's the board sign-in sends you back to.");
       }
   }
