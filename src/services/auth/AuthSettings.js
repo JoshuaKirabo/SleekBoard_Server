@@ -56,9 +56,24 @@ export class AuthSettings
         return Boolean(this.env.K_SERVICE);
       }
 
+    // Every new session's cookie, Google sign-in's included: 30 days. The email + password form sets its own below.
     sessionMs()
       {
         return 30 * DAY_MS;
+      }
+
+    // "Keep me logged in" ticked on the email + password form: 30 days, Mailtrain's figure.
+    rememberMs()
+      {
+        return 30 * DAY_MS;
+      }
+
+    // Unticked, the cookie has no date and ends when the browser closes, which the server never hears about. Its row in
+    // Postgres goes a day after its last request instead, so it's swept soon after the browser closes but never under
+    // someone still using the board (each request pushes it on).
+    browserSessionIdleSeconds()
+      {
+        return DAY_MS / 1000;
       }
 
     // The board's own address, from the first of CLIENT_URL's origins.

@@ -24,6 +24,7 @@ import { JobStore } from "../../src/services/jobs/JobStore.js";
 const url = process.env.TEST_DATABASE_URL;
 const skip = url ? false : "TEST_DATABASE_URL isn't set";
 const CLIENT = "http://localhost:5999";
+const DAY_MS = 24 * 60 * 60_000;
 
 let db;
 let pool;
@@ -213,6 +214,19 @@ test("signing in again keeps the same account and doesn't add a second login", {
     const { cookie } = await signInAs({ email: ownerEmail, sub: await ownerSub() });
     assert.equal((await me(cookie)).body.user.id, owner.id);
     assert.equal(await db.federatedCredential.count({ where: { userId: owner.id } }), 1);
+  });
+
+// The email + password form's remember box sets its own lifetime (auth.controller.js keepFor). Google has no box, so
+// it keeps every session's usual 30 days, on the cookie and on its row.
+test("a Google sign-in still lasts 30 days, on the cookie and on its row", { skip }, async () =>
+  {
+    const { back, cookie } = await signInAs({ email: ownerEmail, sub: await ownerSub() });
+    const set = back.headers.getSetCookie().find((line) => line.startsWith(`${SESSION_COOKIE}=`));
+    const expires = new Date(/Expires=([^;]+)/.exec(set)?.[1]);
+    assert.ok(Math.abs(expires - Date.now() - 30 * DAY_MS) < 60_000, `cookie expires ${expires}`);
+    // Worked out inside Postgres: expire has no time zone, and Postgres and Node can sit in different ones.
+    const { rows } = await pool.query("select extract(epoch from expire - localtimestamp) * 1000 as left_ms from sessions where sid = $1", [sidOf(cookie)]);
+    assert.ok(Math.abs(Number(rows[0].left_ms) - 30 * DAY_MS) < 60_000, `row ends in ${rows[0].left_ms} ms`);
   });
 
 test("someone else's Google account is turned away and no account is made for them", { skip }, async () =>

@@ -88,6 +88,12 @@ const sessionRow = async (cookie) =>
     return rows[0] || null;
   };
 
+// Stands in for time passing: moves the row's end to `left` from now (a Postgres interval, "1 hour", "-1 second").
+const rowEndsIn = (cookie, left) => pool.query("update sessions set expire = localtimestamp + $2::interval where sid = $1", [sidOf(cookie), left]);
+
+// The Expires date on a Set-Cookie line.
+const expiresOf = (setCookie) => new Date(/Expires=([^;]+)/.exec(setCookie)?.[1]);
+
 before(async () =>
   {
     if(skip) return;
@@ -153,17 +159,31 @@ test("the email is matched lowercase and trimmed, like the users table keeps it"
     assert.equal((await me(cookieFrom(res))).body.user.email, ownerEmail);
   });
 
-test("remember ticked: the cookie and its row last the usual 30 days", { skip }, async () =>
+test("remember ticked: the cookie and its row last 30 days", { skip }, async () =>
   {
     const res = await logIn({ email: ownerEmail, password: PASSWORD, remember: true });
     const cookie = cookieFrom(res);
-    const expires = new Date(/Expires=([^;]+)/.exec(setCookieOf(res))?.[1]);
+    const expires = expiresOf(setCookieOf(res));
     assert.ok(Math.abs(expires - Date.now() - 30 * DAY_MS) < 60_000, `cookie expires ${expires}`);
+    const row = await sessionRow(cookie);
+    assert.ok(Math.abs(Number(row.left_ms) - 30 * DAY_MS) < 60_000, `row ends in ${row.left_ms} ms`);
+    assert.ok(Math.abs(new Date(row.sess.cookie.expires) - expires) < 2_000, "the row keeps the cookie's date");
+  });
+
+// Mailtrain's setup: express-session's `rolling` is off, so the browser keeps the date it got at sign-in, and the store
+// is touched on each request, so the row never ends before that date.
+test("remember ticked: using it pushes the row on to 30 days and leaves the browser's cookie as it was", { skip }, async () =>
+  {
+    const cookie = cookieFrom(await logIn({ email: ownerEmail, password: PASSWORD, remember: true }));
+    await rowEndsIn(cookie, "23 days");
+    const who = await me(cookie);
+    assert.equal(who.status, 200);
+    assert.equal(who.setCookie, "", "a new cookie would move the browser's date");
     const row = await sessionRow(cookie);
     assert.ok(Math.abs(Number(row.left_ms) - 30 * DAY_MS) < 60_000, `row ends in ${row.left_ms} ms`);
   });
 
-test("remember unticked: the cookie has no expiry, so it ends when the browser closes, and stays that way", { skip }, async () =>
+test("remember unticked: the cookie has no expiry, so it ends when the browser closes, and its row a day after its last request", { skip }, async () =>
   {
     const res = await logIn({ email: ownerEmail, password: PASSWORD, remember: false });
     assert.equal(res.status, 200);
@@ -171,11 +191,26 @@ test("remember unticked: the cookie has no expiry, so it ends when the browser c
     assert.doesNotMatch(setCookieOf(res), /Expires=|Max-Age=/);
     const row = await sessionRow(cookie);
     assert.equal(row.sess.cookie.expires, null, "the stored session would hand a dated cookie back later");
-    // Using it doesn't quietly turn it back into a 30-day cookie.
+    assert.ok(Math.abs(Number(row.left_ms) - DAY_MS) < 60_000, `row ends in ${row.left_ms} ms`);
+  });
+
+test("remember unticked: using it keeps the cookie dateless and pushes the row on another day", { skip }, async () =>
+  {
+    const cookie = cookieFrom(await logIn({ email: ownerEmail, password: PASSWORD, remember: false }));
+    await rowEndsIn(cookie, "1 hour");
     const who = await me(cookie);
     assert.equal(who.status, 200);
     assert.doesNotMatch(who.setCookie, /Expires=|Max-Age=/);
-    assert.equal((await sessionRow(cookie)).sess.cookie.expires, null);
+    const row = await sessionRow(cookie);
+    assert.equal(row.sess.cookie.expires, null, "using it turned it back into a dated cookie");
+    assert.ok(Math.abs(Number(row.left_ms) - DAY_MS) < 60_000, `row ends in ${row.left_ms} ms`);
+  });
+
+test("remember unticked: a day with no request ends it on the server, even if the browser kept the cookie", { skip }, async () =>
+  {
+    const cookie = cookieFrom(await logIn({ email: ownerEmail, password: PASSWORD, remember: false }));
+    await rowEndsIn(cookie, "-1 second");
+    assert.equal((await me(cookie)).status, 401);
   });
 
 test("leaving remember out counts as unticked", { skip }, async () =>

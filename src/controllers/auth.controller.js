@@ -132,11 +132,12 @@ export class AuthController
         res.status(StatusCodes.SERVICE_UNAVAILABLE).json({ message: LIMITS_DOWN });
       }
 
-    // Remember ticked keeps the session's usual 30 days. Unticked, the cookie loses its expiry date, so the browser
-    // drops it when it closes.
+    // Mailtrain's restLogin: the sign-in itself says how long the cookie lasts. Ticked, 30 days from now (the browser
+    // keeps that date; the row is pushed on by each request). Unticked, no date at all, so the browser drops it when it
+    // closes. Mailtrain writes `expires = false`; null is express-session's own "no date" and sends the same cookie.
     keepFor(req, remember)
       {
-        if(!remember) req.session.cookie.maxAge = null;
+        req.session.cookie.maxAge = remember ? this.settings.rememberMs() : null;
       }
 
     // Saves the session before answering, so the row in Postgres has the same lifetime as the cookie the browser gets.

@@ -15,9 +15,14 @@ const PgStore = connectPgSimple(session);
 export const sessionCookie = (settings) => ({ httpOnly: true, sameSite: "lax", secure: settings.isSecure(), path: "/" });
 
 // `prune` is how often old sessions get swept out (connect-pg-simple's default is 15 minutes). Tests turn it off.
+//
+// express-session touches the row on every request. A dated cookie's row is pushed on to its full length again (30
+// days); the browser keeps the date it was first given, since `rolling` is off, as in Mailtrain. A cookie with no date
+// (remember unticked) gets `ttl` from its last request instead: connect-pg-simple's own default of a day, written out
+// so the choice is here rather than in the library.
 export const sessions = ({ settings, pool, prune }) =>
   {
-    const store = new PgStore({ pool, tableName: "sessions", pruneSessionInterval: prune });
+    const store = new PgStore({ pool, tableName: "sessions", pruneSessionInterval: prune, ttl: settings.browserSessionIdleSeconds() });
     return session(
       {
         name: SESSION_COOKIE,
