@@ -11,6 +11,13 @@ export class SignInGate
     // Google has to have checked the email, and it has to be on the list.
     admits(account)
       {
-        return account.isVerified() && this.emails.includes(account.email());
+        return account.isVerified() && this.allows(account.email());
+      }
+
+    // Whether this (lowercase) email is on the list. Email + password sign-in asks this directly: the email is the one
+    // on the account, so there's nobody else to vouch for it.
+    allows(email)
+      {
+        return Boolean(email) && this.emails.includes(email);
       }
   }

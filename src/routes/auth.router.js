@@ -7,6 +7,7 @@ export const authRoutes = (controller) =>
     const router = Router();
     router.get("/google", (req, res, next) => controller.startGoogle(req, res, next));
     router.get("/google/callback", (req, res, next) => controller.finishGoogle(req, res, next));
+    router.post("/login", (req, res, next) => controller.logIn(req, res, next));
     router.post("/logout", (req, res, next) => controller.signOut(req, res, next));
     router.get("/me", (req, res) => controller.me(req, res));
     return router;

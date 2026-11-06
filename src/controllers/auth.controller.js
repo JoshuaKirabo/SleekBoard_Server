@@ -1,15 +1,21 @@
 import { StatusCodes } from "http-status-codes";
 import { SESSION_COOKIE, sessionCookie } from "../config/session.js";
+import { PasswordLogin } from "../services/auth/PasswordLogin.js";
+
+// One answer for every failed email + password sign-in, so it never says which part was wrong.
+export const WRONG_LOGIN = "That email and password don't match an account.";
 
 // Sign-in's routes, after passport/todos-express-google's routes/auth.js. Start and callback are plain links the
 // login screen opens, so they send you on (to Google, then to the board or back to /login?signin=error&reason=…)
 // instead of answering with JSON. You always land on the board's fixed address, never one taken from the link.
+// Email + password is a fetch from the login form, so it answers with JSON instead.
 export class AuthController
   {
-    constructor({ passport, settings })
+    constructor({ passport, settings, passwords })
       {
         this.passport = passport;
         this.settings = settings;
+        this.passwords = passwords;
       }
 
     // GET /api/auth/google. Off to Google's account picker.
@@ -50,6 +56,38 @@ export class AuthController
         if(info?.reason) return info.reason;
         if(/state/i.test(info?.message || "")) return "expired";
         return "cancelled";
+      }
+
+    // POST /api/auth/login with { email, password, remember }. Flask-Login's login_user: req.logIn starts a fresh
+    // session for the user (passport 0.7 swaps the session id, so nothing from before carries over).
+    async logIn(req, res, next)
+      {
+        const login = new PasswordLogin(req.body);
+        const result = await this.passwords.attempt(login);
+        if(!result.user) return res.status(StatusCodes.UNAUTHORIZED).json({ message: WRONG_LOGIN });
+        req.logIn(result.user, (error) =>
+          {
+            if(error) return next(error);
+            this.keepFor(req, login.remember());
+            this.answerSaved(req, res, next, { user: result.user });
+          });
+      }
+
+    // Remember ticked keeps the session's usual 30 days. Unticked, the cookie loses its expiry date, so the browser
+    // drops it when it closes.
+    keepFor(req, remember)
+      {
+        if(!remember) req.session.cookie.maxAge = null;
+      }
+
+    // Saves the session before answering, so the row in Postgres has the same lifetime as the cookie the browser gets.
+    answerSaved(req, res, next, body)
+      {
+        req.session.save((error) =>
+          {
+            if(error) return next(error);
+            res.json(body);
+          });
       }
 
     // POST /api/auth/logout. passport ends the signed-in session (its row goes), then hands over a fresh empty one,

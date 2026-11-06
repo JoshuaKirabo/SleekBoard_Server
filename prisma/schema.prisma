@@ -30,6 +30,9 @@ model User {
   // when the only login is one that hides its email, like some GitHub accounts.
   email     String?  @unique @db.VarChar(320)
   name      String   @default("") @db.VarChar(200)
+  // The password hashed with argon2id (PasswordHash.js), never the password itself. Empty for someone who only signs
+  // in with Google, which also means email + password can't get them in.
+  passwordHash String? @map("password_hash") @db.VarChar(255)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
