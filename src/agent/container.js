@@ -22,7 +22,6 @@ import { fetchPage, readJob } from "../services/jobReader.js";
 import { contactBook, jobCard } from "../services/contacts/index.js";
 import { SuggestionDesk } from "../services/contacts/SuggestionDesk.js";
 import { EmailTask } from "./tasks/EmailTask.js";
-import { Mailbox } from "../models/mailbox.model.js";
 import { replyDesk, laneMove } from "../services/email/index.js";
 import { ReplyCheck } from "../services/email/ReplyCheck.js";
 import { GmailApi } from "../services/email/GmailApi.js";
@@ -109,7 +108,7 @@ const gmailKeysOrNull = () =>
   };
 
 const gmailApi = new GmailApi();
-const mailbox = new MailboxStore({ Mailbox });
+const mailbox = new MailboxStore({ db: prisma, userId: () => owner.id() });
 const googleAuth = new GoogleAuth({ clientId: process.env.GMAIL_CLIENT_ID, clientSecret: process.env.GMAIL_CLIENT_SECRET, redirectUri: gmailRedirect });
 const gmailKeys = gmailKeysOrNull();
 export const gmailTokens = new GmailTokens({ mailbox, auth: googleAuth, keys: gmailKeys });

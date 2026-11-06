@@ -1,6 +1,5 @@
 import "dotenv/config";
 import mongoose from "mongoose";
-import { connectDB } from "../config/db.js";
 import { DatabaseUrl } from "../config/DatabaseUrl.js";
 import { prisma } from "../config/prisma.js";
 
@@ -354,7 +353,14 @@ if(fresh && !database.isConfirmedBy(argument("--confirm")))
     process.exit(1);
   }
 
-await connectDB(process.env.MONGODB_URI || process.env.MONGO_URI);
+// Atlas, read only. The database is named here because an Atlas URI usually leaves it off.
+const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
+if(!mongoUri)
+  {
+    console.error("MONGODB_URI is missing from .env, so there's no Atlas to copy from.");
+    process.exit(1);
+  }
+await mongoose.connect(mongoUri, { dbName: "sleekboard", serverSelectionTimeoutMS: 10000 });
 try
   {
     const ok = await new MongoCopy(mongoose.connection.db, prisma, ownerEmail).run(fresh);

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import app from "./app.js";
-import { connectDB } from "./config/db.js";
+import { DatabaseUrl } from "./config/DatabaseUrl.js";
 import { runStore, mailTimer } from "./agent/container.js";
 
 const PORT = process.env.PORT || 5050;
@@ -27,12 +27,33 @@ const listenFailure = (error) =>
       }
   };
 
-// Mongo first, then the server. No point taking requests we can't answer.
+// Turns a failed first query into one plain sentence that names the database (never its password) and what to check.
+const databaseFailure = (error) =>
+  {
+    const where = new DatabaseUrl(process.env.DATABASE_URL).label();
+    switch(error.code)
+      {
+        case "ECONNREFUSED":
+        case "ENOTFOUND":
+        case "ETIMEDOUT":
+        case "P1001":
+          return `Postgres isn't answering at ${where}. Is it running, and is DATABASE_URL right?`;
+        case "P1000":
+        case "P1010":
+          return `Postgres turned down the login for ${where}. Check the user in DATABASE_URL, and that prisma/roles.sql has been run.`;
+        case "P1003":
+          return `There's no database ${where}. Run npm run db:migrate first.`;
+        default:
+          return String(error.message || error).replace(/\s+/g, " ").trim();
+      }
+  };
+
+// The database first, then the server. No point taking requests we can't answer. Marking interrupted runs is the
+// first query, so a Postgres that's down or a wrong DATABASE_URL stops the start here with one sentence.
 const start = async () =>
   {
     try
       {
-        await connectDB(process.env.MONGODB_URI || process.env.MONGO_URI);
         // Runs that were mid-way when the server last stopped can't finish now, so they get marked failed.
         await runStore.failInterrupted();
         // Checks your inbox for replies every so often. Does nothing until Gmail is connected.
@@ -50,7 +71,7 @@ const start = async () =>
       }
     catch(error)
       {
-        console.error("Couldn't start the server:", error.message);
+        console.error(`Couldn't start the server: ${databaseFailure(error)}`);
         process.exit(1);
       }
   };

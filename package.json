@@ -22,12 +22,12 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "http-status-codes": "^2.3.0",
-    "mongoose": "^8.19.0",
     "openai": "^7.45.1",
     "pg": "^8.23.1",
     "pg-connection-string": "^2.14.1"
   },
   "devDependencies": {
+    "mongoose": "^8.24.8",
     "prisma": "^7.10.1"
   }
 }
