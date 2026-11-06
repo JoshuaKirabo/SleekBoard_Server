@@ -12,6 +12,7 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:copy": "node src/scripts/copyFromMongo.js",
+    "set-password": "node src/scripts/setPassword.js",
     "test:db": "node --env-file=.env --test --test-concurrency=1 \"test/**/*.pg.test.js\""
   },
   "license": "ISC",
