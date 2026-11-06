@@ -11,6 +11,7 @@ import { PassportSetup } from "./PassportSetup.js";
 import { PasswordBook } from "./PasswordBook.js";
 import { PasswordHash } from "./PasswordHash.js";
 import { PasswordSignIn } from "./PasswordSignIn.js";
+import { DecoyHash } from "./DecoyHash.js";
 
 // Sign-in, wired once for the whole server. Only the owner (OWNER_EMAIL) gets in for now, and their first Google
 // sign-in links to the account db:copy made for them. Email + password goes through the same gate, and only works
@@ -20,7 +21,11 @@ export const authSettings = new AuthSettings({ env: process.env });
 const gate = new SignInGate({ emails: [process.env.OWNER_EMAIL] });
 const logins = new LoginBook({ db: prisma, linkableEmail: process.env.OWNER_EMAIL });
 const signIn = new SignIn({ gate, logins });
-const passwords = new PasswordSignIn({ gate, passwords: new PasswordBook({ db: prisma }), hasher: new PasswordHash() });
+const hasher = new PasswordHash();
+const decoy = new DecoyHash({ hasher });
+// Made now rather than on the first turned-away sign-in, which would otherwise take twice as long as the rest.
+decoy.stored().catch((error) => console.error("Making the decoy password hash failed:", error.message));
+const passwords = new PasswordSignIn({ gate, passwords: new PasswordBook({ db: prisma }), hasher, decoy });
 new PassportSetup({ passport, settings: authSettings, signIn, logins, passwords }).install();
 
 // The session store gets its own small pool, as sleekboard_app, held to the same rule as Prisma's: a database off

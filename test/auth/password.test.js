@@ -8,6 +8,7 @@ import { PassportSetup } from "../../src/services/auth/PassportSetup.js";
 import { PasswordHash } from "../../src/services/auth/PasswordHash.js";
 import { PasswordLogin } from "../../src/services/auth/PasswordLogin.js";
 import { PasswordSignIn, WRONG_LOGIN } from "../../src/services/auth/PasswordSignIn.js";
+import { DecoyHash } from "../../src/services/auth/DecoyHash.js";
 import { SignInGate } from "../../src/services/auth/SignInGate.js";
 
 const hasher = new PasswordHash();
@@ -84,18 +85,36 @@ test("the gate allows the owner's email and nothing else, and nobody when OWNER_
 
 const OWNER = { id: "u1", email: "josh@gmail.com", name: "Josh" };
 
-// A sign-in over one stored account, counting how often it looked anyone up.
-const signInWith = async ({ password = "right", hasPassword = true, owners = ["josh@gmail.com"] } = {}) =>
+// The real hasher, keeping every hash it was asked to check a password against.
+class CountingHasher extends PasswordHash
   {
-    const passwordHash = hasPassword ? await hasher.make(password) : null;
+    constructor()
+      {
+        super();
+        this.checked = [];
+      }
+
+    matches(password, stored)
+      {
+        this.checked.push(stored);
+        return super.matches(password, stored);
+      }
+  }
+
+// A sign-in over one stored account, counting how often it looked anyone up and ran argon2.
+const signInWith = async ({ password = "right", passwordHash, hasPassword = true, owners = ["josh@gmail.com"] } = {}) =>
+  {
+    const stored = passwordHash ?? (hasPassword ? await hasher.make(password) : null);
     const asked = [];
     const holder = async (email) =>
       {
         asked.push(email);
-        return email === OWNER.email ? { ...OWNER, passwordHash } : null;
+        return email === OWNER.email ? { ...OWNER, passwordHash: stored } : null;
       };
-    const signIn = new PasswordSignIn({ gate: new SignInGate({ emails: owners }), passwords: { holder }, hasher });
-    return { signIn, asked };
+    const counting = new CountingHasher();
+    const decoy = new DecoyHash({ hasher: counting });
+    const signIn = new PasswordSignIn({ gate: new SignInGate({ emails: owners }), passwords: { holder }, hasher: counting, decoy });
+    return { signIn, asked, checked: counting.checked, stored, decoy };
   };
 
 const typed = (email, password) => new PasswordLogin({ email, password });
@@ -117,11 +136,11 @@ test("a wrong password, an unknown email and an account with no password all get
     assert.deepEqual(await googleOnly.signIn.attempt(typed("josh@gmail.com", "right")), { reason: "wrong" });
   });
 
-test("someone who isn't the owner is turned away the same way, before anyone is looked up", async () =>
+test("someone who isn't the owner is turned away the same way, even with the account's right password", async () =>
   {
     const { signIn, asked } = await signInWith({ owners: ["someone-else@gmail.com"] });
     assert.deepEqual(await signIn.attempt(typed("josh@gmail.com", "right")), { reason: "wrong" });
-    assert.deepEqual(asked, []);
+    assert.deepEqual(asked, ["josh@gmail.com"]);
   });
 
 test("an empty email or password is turned away without a lookup", async () =>
@@ -130,6 +149,84 @@ test("an empty email or password is turned away without a lookup", async () =>
     assert.deepEqual(await signIn.attempt(typed("", "right")), { reason: "wrong" });
     assert.deepEqual(await signIn.attempt(typed("josh@gmail.com", "")), { reason: "wrong" });
     assert.deepEqual(asked, []);
+  });
+
+test("every way in runs argon2 exactly once and looks the email up once: the real hash for the owner, else the decoy", async () =>
+  {
+    const cases =
+      [
+        { name: "right password", setup: {}, email: "josh@gmail.com", against: "real", answer: { user: OWNER } },
+        { name: "wrong password", setup: {}, email: "josh@gmail.com", password: "wrong", against: "real" },
+        { name: "unknown email", setup: { owners: ["josh@gmail.com", "nobody@gmail.com"] }, email: "nobody@gmail.com", against: "decoy" },
+        { name: "not the owner", setup: { owners: ["someone-else@gmail.com"] }, email: "josh@gmail.com", against: "decoy" },
+        { name: "unknown and not the owner", setup: {}, email: "nobody@gmail.com", against: "decoy" },
+        { name: "Google only", setup: { hasPassword: false }, email: "josh@gmail.com", against: "decoy" },
+        { name: "plain text in the column", setup: { passwordHash: "right" }, email: "josh@gmail.com", against: "decoy" },
+      ];
+    for(const { name, setup, email, password = "right", against, answer = { reason: "wrong" } } of cases)
+      {
+        const { signIn, asked, checked, stored, decoy } = await signInWith(setup);
+        assert.deepEqual(await signIn.attempt(typed(email, password)), answer, name);
+        assert.equal(asked.length, 1, `${name}: looked up once`);
+        assert.equal(checked.length, 1, `${name}: argon2 ran once`);
+        assert.equal(checked[0], against === "real" ? stored : await decoy.stored(), `${name}: checked against the ${against} hash`);
+      }
+  });
+
+test("a password that matches the decoy is still turned away", async () =>
+  {
+    const typedHash = await hasher.make("typed by an attacker");
+    const decoy = { stored: async () => typedHash };
+    const signIn = new PasswordSignIn({ gate: new SignInGate({ emails: ["josh@gmail.com"] }), passwords: { holder: async () => null }, hasher, decoy });
+    assert.deepEqual(await signIn.attempt(typed("josh@gmail.com", "typed by an attacker")), { reason: "wrong" });
+  });
+
+// --- DecoyHash ---
+
+// A hasher that keeps every password it was asked to hash, and can be told to fail.
+const recordingHasher = ({ fails = 0 } = {}) =>
+  {
+    const made = [];
+    let failures = fails;
+    const make = async (password) =>
+      {
+        made.push(password);
+        if(failures-- > 0) throw new Error("out of memory");
+        return hasher.make(password);
+      };
+    return { made, make };
+  };
+
+test("the decoy is made once, on first ask, and the same hash is handed out every time after, even to asks at once", async () =>
+  {
+    const recording = recordingHasher();
+    const decoy = new DecoyHash({ hasher: recording });
+    assert.equal(recording.made.length, 0);
+    const [first, second] = await Promise.all([decoy.stored(), decoy.stored()]);
+    assert.equal(await decoy.stored(), first);
+    assert.equal(second, first);
+    assert.equal(recording.made.length, 1);
+  });
+
+test("the decoy is an argon2id hash with the same settings as a real one, of a long random password", async () =>
+  {
+    const recording = recordingHasher();
+    const other = recordingHasher();
+    const stored = await new DecoyHash({ hasher: recording }).stored();
+    await new DecoyHash({ hasher: other }).stored();
+    const real = await hasher.make("correct horse");
+    assert.equal(stored.split("$").slice(0, 4).join("$"), real.split("$").slice(0, 4).join("$"));
+    assert.ok(recording.made[0].length >= 40);
+    assert.notEqual(recording.made[0], other.made[0]);
+  });
+
+test("a decoy that fails to be made is tried again on the next ask", async () =>
+  {
+    const recording = recordingHasher({ fails: 1 });
+    const decoy = new DecoyHash({ hasher: recording });
+    await assert.rejects(decoy.stored(), /out of memory/);
+    assert.ok(new PasswordHash().isArgon2(await decoy.stored()));
+    assert.equal(recording.made.length, 2);
   });
 
 // --- passport-local strategy (PassportSetup) ---

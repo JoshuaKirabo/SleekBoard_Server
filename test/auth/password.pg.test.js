@@ -14,6 +14,7 @@ import { PassportSetup } from "../../src/services/auth/PassportSetup.js";
 import { PasswordBook } from "../../src/services/auth/PasswordBook.js";
 import { PasswordHash } from "../../src/services/auth/PasswordHash.js";
 import { PasswordSignIn } from "../../src/services/auth/PasswordSignIn.js";
+import { DecoyHash } from "../../src/services/auth/DecoyHash.js";
 import { AuthController, WRONG_LOGIN } from "../../src/controllers/auth.controller.js";
 import { authRoutes } from "../../src/routes/auth.router.js";
 import { sessions, SESSION_COOKIE } from "../../src/config/session.js";
@@ -84,7 +85,9 @@ before(async () =>
     const gate = new SignInGate({ emails: [ownerEmail, googleOnlyEmail] });
     const logins = new LoginBook({ db, linkableEmail: ownerEmail });
     const hasher = new PasswordHash();
-    const passwords = new PasswordSignIn({ gate, passwords: new PasswordBook({ db }), hasher });
+    const decoy = new DecoyHash({ hasher });
+    await decoy.stored();
+    const passwords = new PasswordSignIn({ gate, passwords: new PasswordBook({ db }), hasher, decoy });
     new PassportSetup({ passport, settings, signIn: new SignIn({ gate, logins }), logins, passwords }).install();
 
     const server = express();
@@ -197,6 +200,43 @@ test("a wrong password, an unknown email, a non-owner and a Google-only account 
         assert.deepEqual(await res.json(), { message: WRONG_LOGIN });
         assert.equal(setCookieOf(res), "", `a session was started for ${JSON.stringify(body)}`);
       }
+  });
+
+// How long one turned-away login takes, in ms, from sending it to having the whole answer.
+const timeTurnedAway = async (body) =>
+  {
+    const started = performance.now();
+    const res = await logIn(body);
+    await res.text();
+    assert.equal(res.status, 401, JSON.stringify(body));
+    return performance.now() - started;
+  };
+
+const median = (times) => [...times].sort((a, b) => a - b)[Math.floor(times.length / 2)];
+
+// Before, only a wrong password ran argon2 (~20 ms here) and the rest answered in a few ms, a gap of 5x or more. The
+// tries are taken in turns, so anything else slowing the machine down lands on every kind alike, and medians shrug off
+// the odd slow one; 1.5x leaves room for noise while still catching a path that skips argon2.
+test("an unknown email, a non-owner and a Google-only account take as long to turn away as a wrong password", { skip }, async (t) =>
+  {
+    const tries =
+      {
+        "wrong password": { email: ownerEmail, password: "wrong password" },
+        "unknown email": { email: `nobody-${randomUUID()}@example.com`, password: PASSWORD },
+        "not the owner": { email: strangerEmail, password: PASSWORD },
+        "Google only": { email: googleOnlyEmail, password: PASSWORD },
+      };
+    const times = Object.fromEntries(Object.keys(tries).map((name) => [name, []]));
+    for(const body of Object.values(tries)) await timeTurnedAway(body);
+    for(let round = 0; round < 9; round++)
+      {
+        for(const [name, body] of Object.entries(tries)) times[name].push(await timeTurnedAway(body));
+      }
+    const medians = Object.fromEntries(Object.entries(times).map(([name, list]) => [name, median(list)]));
+    t.diagnostic(Object.entries(medians).map(([name, ms]) => `${name} ${ms.toFixed(1)} ms`).join(", "));
+    const slowest = Math.max(...Object.values(medians));
+    const fastest = Math.min(...Object.values(medians));
+    assert.ok(slowest / fastest < 1.5, `medians too far apart: ${JSON.stringify(medians)}`);
   });
 
 test("a wrong password doesn't sign out a session that's already signed in", { skip }, async () =>
