@@ -1,4 +1,4 @@
-# Builds the server image on every push to main, pushes it to Artifact
+# Builds the server image (when run, see below), pushes it to Artifact
 # Registry tagged with the commit SHA, then points Cloud Run at it.
 #
 # Set these under GitHub repo -> Settings -> Secrets and variables -> Actions:
@@ -12,9 +12,11 @@
 
 name: Deploy to Cloud Run
 
+# Paused until Cloud Run is set up: it only runs from the Actions tab's "Run workflow" button. To deploy on every
+# push again, put this back above workflow_dispatch:
+#   push:
+#     branches: [main]
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
