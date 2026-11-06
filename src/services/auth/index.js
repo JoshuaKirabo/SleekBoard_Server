@@ -15,13 +15,12 @@ import { DecoyHash } from "./DecoyHash.js";
 import { LoginLimits } from "./LoginLimits.js";
 import { SessionLifetime } from "./SessionLifetime.js";
 
-// Sign-in, wired once for the whole server. Only the owner (OWNER_EMAIL) gets in for now, and their first Google
-// sign-in links to the account db:copy made for them. Email + password goes through the same gate, and only works
-// for an account that already has a password; there's no sign-up.
+// Sign-in, wired once for the whole server. Anyone gets in with an email Google has checked, or an email + password on
+// an account that has one. A first Google sign-in links to the account already under its email (LoginBook).
 export const authSettings = new AuthSettings({ env: process.env });
 
-const gate = new SignInGate({ emails: [process.env.OWNER_EMAIL] });
-const logins = new LoginBook({ db: prisma, linkableEmail: process.env.OWNER_EMAIL });
+const gate = new SignInGate();
+const logins = new LoginBook({ db: prisma });
 const signIn = new SignIn({ gate, logins });
 const hasher = new PasswordHash();
 const decoy = new DecoyHash({ hasher });

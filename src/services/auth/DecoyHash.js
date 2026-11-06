@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 
-// A stand-in hash to check a typed password against when there's no real one: nobody by that email, not the owner,
-// or an account with no password. better-auth's email sign-in hashes the typed password in those cases so they take
+// A stand-in hash to check a typed password against when there's no real one: nobody by that email, or an account
+// with no password. better-auth's email sign-in hashes the typed password in those cases so they take
 // as long as a wrong password; checking against a decoy runs the very same argon2.verify a wrong password does.
 //
 // The decoy is a hash of a random password that's never kept or shown, so nobody can type it, and PasswordSignIn

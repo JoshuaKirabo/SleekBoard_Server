@@ -33,6 +33,9 @@ model User {
   // The password hashed with argon2id (PasswordHash.js), never the password itself. Empty for someone who only signs
   // in with Google, which also means email + password can't get them in.
   passwordHash String? @map("password_hash") @db.VarChar(255)
+  // Whether the email is known to be theirs: Google checked it, or the account was here before anyone could sign up.
+  // A password on an unconfirmed email is wiped when that email's Google account signs in (LoginBook).
+  emailVerified Boolean @default(false) @map("email_verified")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

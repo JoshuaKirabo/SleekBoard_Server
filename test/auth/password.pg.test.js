@@ -31,9 +31,9 @@ let db;
 let pool;
 let app;
 const ownerEmail = `owner-${randomUUID()}@example.com`;
-// Has a password but isn't on the gate's list.
+// Someone else with a password, who gets in the same as the owner now anyone can sign in.
 const strangerEmail = `stranger-${randomUUID()}@example.com`;
-// On the list, but only ever signed in with Google, so no password.
+// Only ever signed in with Google, so no password.
 const googleOnlyEmail = `google-${randomUUID()}@example.com`;
 // Every session id the tests were handed, so after() can sweep them all.
 const sids = new Set();
@@ -103,8 +103,8 @@ before(async () =>
 
     const settings = new AuthSettings({ env: { SESSION_SECRET: randomBytes(32).toString("base64url") } });
     const passport = new Passport();
-    const gate = new SignInGate({ emails: [ownerEmail, googleOnlyEmail] });
-    const logins = new LoginBook({ db, linkableEmail: ownerEmail });
+    const gate = new SignInGate();
+    const logins = new LoginBook({ db });
     const hasher = new PasswordHash();
     const decoy = new DecoyHash({ hasher });
     await decoy.stored();
@@ -153,6 +153,13 @@ test("the right password signs the owner in, answering with their public fields 
     assert.equal(who.status, 200);
     assert.equal(who.body.user.id, owner.id);
     assert.equal("passwordHash" in who.body.user, false);
+  });
+
+test("anyone with a password signs in, not only the owner", { skip }, async () =>
+  {
+    const res = await logIn({ email: strangerEmail, password: PASSWORD, remember: true });
+    assert.equal(res.status, 200);
+    assert.equal((await me(cookieFrom(res))).body.user.email, strangerEmail);
   });
 
 test("the email is matched lowercase and trimmed, like the users table keeps it", { skip }, async () =>
@@ -233,13 +240,12 @@ test("signing in starts a fresh session: the old cookie's row goes and it no lon
     assert.equal((await me(second)).status, 200);
   });
 
-test("a wrong password, an unknown email, a non-owner and a Google-only account all get the same 401 and no session", { skip }, async () =>
+test("a wrong password, an unknown email and a Google-only account all get the same 401 and no session", { skip }, async () =>
   {
     const tries =
       [
         { email: ownerEmail, password: "wrong password" },
         { email: `nobody-${randomUUID()}@example.com`, password: PASSWORD },
-        { email: strangerEmail, password: PASSWORD },
         { email: googleOnlyEmail, password: PASSWORD },
         { email: ownerEmail, password: "" },
         { email: ownerEmail },
@@ -269,13 +275,12 @@ const median = (times) => [...times].sort((a, b) => a - b)[Math.floor(times.leng
 // Before, only a wrong password ran argon2 (~20 ms here) and the rest answered in a few ms, a gap of 5x or more. The
 // tries are taken in turns, so anything else slowing the machine down lands on every kind alike, and medians shrug off
 // the odd slow one; 1.5x leaves room for noise while still catching a path that skips argon2.
-test("an unknown email, a non-owner and a Google-only account take as long to turn away as a wrong password", { skip }, async (t) =>
+test("an unknown email and a Google-only account take as long to turn away as a wrong password", { skip }, async (t) =>
   {
     const tries =
       {
         "wrong password": { email: ownerEmail, password: "wrong password" },
         "unknown email": { email: `nobody-${randomUUID()}@example.com`, password: PASSWORD },
-        "not the owner": { email: strangerEmail, password: PASSWORD },
         "Google only": { email: googleOnlyEmail, password: PASSWORD },
       };
     const times = Object.fromEntries(Object.keys(tries).map((name) => [name, []]));

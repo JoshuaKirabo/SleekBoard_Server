@@ -60,12 +60,19 @@ test("the same Google login comes back as the same user, even after its email ch
     assert.equal(await db.user.count({ where: { email: { in: emails.slice(-2) } } }), 1);
   });
 
+test("a new Google login makes its user confirmed", { skip }, async () =>
+  {
+    const address = email();
+    await new LoginBook({ db }).userFor(google(address));
+    assert.equal((await db.user.findUnique({ where: { email: address } })).emailVerified, true);
+  });
+
 test("the owner's first sign-in links to the account db:copy made, keeping its data", { skip }, async () =>
   {
     const address = email();
-    const owner = await db.user.create({ data: { email: address, name: "Owner" } });
+    const owner = await db.user.create({ data: { email: address, name: "Owner", emailVerified: true } });
     await db.job.create({ data: { userId: owner.id, company: "Stripe", role: "SWE" } });
-    const user = await new LoginBook({ db, linkableEmail: address.toUpperCase() }).userFor(google(address));
+    const user = await new LoginBook({ db }).userFor(google(address));
     assert.equal(user.id, owner.id);
     assert.equal(await db.job.count({ where: { userId: owner.id } }), 1);
     assert.equal(await db.federatedCredential.count({ where: { userId: owner.id } }), 1);
@@ -74,19 +81,31 @@ test("the owner's first sign-in links to the account db:copy made, keeping its d
 test("a second Google account with the owner's email is refused once the owner has a login", { skip }, async () =>
   {
     const address = email();
-    const book = new LoginBook({ db, linkableEmail: address });
+    const book = new LoginBook({ db });
     const owner = await book.userFor(google(address));
     assert.equal(await book.userFor(google(address)), null);
     assert.equal(await db.federatedCredential.count({ where: { userId: owner.id } }), 1);
   });
 
-test("an existing account that isn't the owner's is never linked by email", { skip }, async () =>
+test("an unconfirmed account with a password is claimed by its email's Google login: password wiped, now confirmed", { skip }, async () =>
   {
     const address = email();
-    const someone = await db.user.create({ data: { email: address } });
-    assert.equal(await new LoginBook({ db, linkableEmail: "owner@example.com" }).userFor(google(address)), null);
-    assert.equal(await new LoginBook({ db }).userFor(google(address)), null);
-    assert.equal(await db.federatedCredential.count({ where: { userId: someone.id } }), 0);
+    const someone = await db.user.create({ data: { email: address, passwordHash: "$argon2id$stand-in" } });
+    const user = await new LoginBook({ db }).userFor(google(address));
+    assert.equal(user.id, someone.id);
+    assert.deepEqual(Object.keys(user).sort(), ["email", "id", "name"]);
+    const after = await db.user.findUnique({ where: { id: someone.id } });
+    assert.equal(after.passwordHash, null);
+    assert.equal(after.emailVerified, true);
+    assert.equal(await db.federatedCredential.count({ where: { userId: someone.id } }), 1);
+  });
+
+test("a confirmed account keeps its password when linked", { skip }, async () =>
+  {
+    const address = email();
+    const someone = await db.user.create({ data: { email: address, passwordHash: "$argon2id$stand-in", emailVerified: true } });
+    await new LoginBook({ db }).userFor(google(address));
+    assert.equal((await db.user.findUnique({ where: { id: someone.id } })).passwordHash, "$argon2id$stand-in");
   });
 
 test("find gives the user's public fields, and null for a deleted user or a bad id", { skip }, async () =>

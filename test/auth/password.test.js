@@ -72,13 +72,12 @@ test("a login with missing or wrong-typed fields reads as empty", () =>
 
 // --- SignInGate.allows ---
 
-test("the gate allows the owner's email and nothing else, and nobody when OWNER_EMAIL is empty", () =>
+test("the gate allows any email, and nobody without one", () =>
   {
-    const gate = new SignInGate({ emails: [" JOSH@gmail.com "] });
+    const gate = new SignInGate();
     assert.equal(gate.allows("josh@gmail.com"), true);
-    assert.equal(gate.allows("sam@gmail.com"), false);
+    assert.equal(gate.allows("sam@gmail.com"), true);
     assert.equal(gate.allows(""), false);
-    assert.equal(new SignInGate({ emails: [undefined] }).allows(""), false);
   });
 
 // --- PasswordSignIn ---
@@ -102,7 +101,7 @@ class CountingHasher extends PasswordHash
   }
 
 // A sign-in over one stored account, counting how often it looked anyone up and ran argon2.
-const signInWith = async ({ password = "right", passwordHash, hasPassword = true, owners = ["josh@gmail.com"] } = {}) =>
+const signInWith = async ({ password = "right", passwordHash, hasPassword = true } = {}) =>
   {
     const stored = passwordHash ?? (hasPassword ? await hasher.make(password) : null);
     const asked = [];
@@ -113,7 +112,7 @@ const signInWith = async ({ password = "right", passwordHash, hasPassword = true
       };
     const counting = new CountingHasher();
     const decoy = new DecoyHash({ hasher: counting });
-    const signIn = new PasswordSignIn({ gate: new SignInGate({ emails: owners }), passwords: { holder }, hasher: counting, decoy });
+    const signIn = new PasswordSignIn({ gate: new SignInGate(), passwords: { holder }, hasher: counting, decoy });
     return { signIn, asked, checked: counting.checked, stored, decoy };
   };
 
@@ -129,18 +128,10 @@ test("a wrong password, an unknown email and an account with no password all get
   {
     const { signIn } = await signInWith();
     assert.deepEqual(await signIn.attempt(typed("josh@gmail.com", "wrong")), { reason: "wrong" });
-    const unknown = await signInWith({ owners: ["josh@gmail.com", "nobody@gmail.com"] });
-    assert.deepEqual(await unknown.signIn.attempt(typed("nobody@gmail.com", "right")), { reason: "wrong" });
+    assert.deepEqual(await signIn.attempt(typed("nobody@gmail.com", "right")), { reason: "wrong" });
     const googleOnly = await signInWith({ hasPassword: false });
     assert.deepEqual(await googleOnly.signIn.attempt(typed("josh@gmail.com", "")), { reason: "wrong" });
     assert.deepEqual(await googleOnly.signIn.attempt(typed("josh@gmail.com", "right")), { reason: "wrong" });
-  });
-
-test("someone who isn't the owner is turned away the same way, even with the account's right password", async () =>
-  {
-    const { signIn, asked } = await signInWith({ owners: ["someone-else@gmail.com"] });
-    assert.deepEqual(await signIn.attempt(typed("josh@gmail.com", "right")), { reason: "wrong" });
-    assert.deepEqual(asked, ["josh@gmail.com"]);
   });
 
 test("an empty email or password is turned away without a lookup", async () =>
@@ -151,15 +142,13 @@ test("an empty email or password is turned away without a lookup", async () =>
     assert.deepEqual(asked, []);
   });
 
-test("every way in runs argon2 exactly once and looks the email up once: the real hash for the owner, else the decoy", async () =>
+test("every way in runs argon2 exactly once and looks the email up once: the real hash for the account, else the decoy", async () =>
   {
     const cases =
       [
         { name: "right password", setup: {}, email: "josh@gmail.com", against: "real", answer: { user: OWNER } },
         { name: "wrong password", setup: {}, email: "josh@gmail.com", password: "wrong", against: "real" },
-        { name: "unknown email", setup: { owners: ["josh@gmail.com", "nobody@gmail.com"] }, email: "nobody@gmail.com", against: "decoy" },
-        { name: "not the owner", setup: { owners: ["someone-else@gmail.com"] }, email: "josh@gmail.com", against: "decoy" },
-        { name: "unknown and not the owner", setup: {}, email: "nobody@gmail.com", against: "decoy" },
+        { name: "unknown email", setup: {}, email: "nobody@gmail.com", against: "decoy" },
         { name: "Google only", setup: { hasPassword: false }, email: "josh@gmail.com", against: "decoy" },
         { name: "plain text in the column", setup: { passwordHash: "right" }, email: "josh@gmail.com", against: "decoy" },
       ];
@@ -177,7 +166,7 @@ test("a password that matches the decoy is still turned away", async () =>
   {
     const typedHash = await hasher.make("typed by an attacker");
     const decoy = { stored: async () => typedHash };
-    const signIn = new PasswordSignIn({ gate: new SignInGate({ emails: ["josh@gmail.com"] }), passwords: { holder: async () => null }, hasher, decoy });
+    const signIn = new PasswordSignIn({ gate: new SignInGate(), passwords: { holder: async () => null }, hasher, decoy });
     assert.deepEqual(await signIn.attempt(typed("josh@gmail.com", "typed by an attacker")), { reason: "wrong" });
   });
 

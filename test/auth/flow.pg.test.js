@@ -33,7 +33,7 @@ let app;
 let fakeGoogle;
 const servers = [];
 const ownerEmail = `owner-${randomUUID()}@example.com`;
-// A second person let in for these tests only, to check two signed-in people stay apart.
+// A second person, to check two signed-in people stay apart.
 const friendEmail = `friend-${randomUUID()}@example.com`;
 // Who each made-up authorization code signs in as.
 const codes = new Map();
@@ -135,8 +135,8 @@ before(async () =>
     const env = { SESSION_SECRET: randomBytes(32).toString("base64url"), GMAIL_CLIENT_ID: "test-client", GMAIL_CLIENT_SECRET: "test-secret", CLIENT_URL: CLIENT };
     const settings = new AuthSettings({ env });
     const passport = new Passport();
-    const logins = new LoginBook({ db, linkableEmail: ownerEmail });
-    const signIn = new SignIn({ gate: new SignInGate({ emails: [ownerEmail, friendEmail] }), logins });
+    const logins = new LoginBook({ db });
+    const signIn = new SignIn({ gate: new SignInGate(), logins });
     const people = new CurrentUser();
     const jobs = new JobStore({ db, userId: () => people.id() });
 
@@ -249,13 +249,39 @@ test("a Google sign-in is stamped, its row never ends after the stamp's 30 days,
     assert.equal(await sessionRows(cookie), 0);
   });
 
-test("someone else's Google account is turned away and no account is made for them", { skip }, async () =>
+test("someone new signs in with Google into an account of their own, confirmed and empty", { skip }, async () =>
   {
     const stranger = `stranger-${randomUUID()}@example.com`;
     const { back, cookie } = await signInAs({ email: stranger });
-    assert.equal(back.headers.get("location"), `${CLIENT}/login?signin=error&reason=not_allowed`);
-    assert.equal(await db.user.count({ where: { email: stranger } }), 0);
-    assert.equal((await me(cookie)).status, 401);
+    assert.equal(back.headers.get("location"), `${CLIENT}/`);
+    assert.equal((await me(cookie)).body.user.email, stranger);
+    const made = await db.user.findUnique({ where: { email: stranger } });
+    assert.equal(made.emailVerified, true);
+    assert.deepEqual(await (await get("/api/jobs", cookie)).json(), []);
+  });
+
+test("Google takes back an email someone else signed up with: their password is wiped and they're signed out", { skip }, async () =>
+  {
+    const stranger = `stranger-${randomUUID()}@example.com`;
+    const squatter = await db.user.create({ data: { email: stranger, name: "Squatter", passwordHash: "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA" } });
+    await pool.query("insert into sessions (sid, sess, expire) values ($1, $2, now() + interval '1 day')", [`squat-${randomUUID()}`, JSON.stringify({ cookie: {}, passport: { user: squatter.id } })]);
+    const { cookie } = await signInAs({ email: stranger });
+    assert.equal((await me(cookie)).body.user.id, squatter.id);
+    const claimed = await db.user.findUnique({ where: { id: squatter.id } });
+    assert.equal(claimed.passwordHash, null);
+    assert.equal(claimed.emailVerified, true);
+    const { rows } = await pool.query("select count(*)::int as n from sessions where sess->'passport'->>'user' = $1 and sid <> $2", [squatter.id, sidOf(cookie)]);
+    assert.equal(rows[0].n, 0);
+  });
+
+test("a confirmed account keeps its password when its Google account first signs in", { skip }, async () =>
+  {
+    const stranger = `stranger-${randomUUID()}@example.com`;
+    const hash = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA";
+    const confirmed = await db.user.create({ data: { email: stranger, passwordHash: hash, emailVerified: true } });
+    const { cookie } = await signInAs({ email: stranger });
+    assert.equal((await me(cookie)).body.user.id, confirmed.id);
+    assert.equal((await db.user.findUnique({ where: { id: confirmed.id } })).passwordHash, hash);
   });
 
 test("the owner's email unverified by Google is turned away", { skip }, async () =>

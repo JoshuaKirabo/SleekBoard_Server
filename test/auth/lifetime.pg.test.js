@@ -127,8 +127,8 @@ before(async () =>
     const settings = new AuthSettings({ env: { SESSION_SECRET: randomBytes(32).toString("base64url") } });
     lifetime = new SessionLifetime({ settings });
     const passport = new Passport();
-    const gate = new SignInGate({ emails: [ownerEmail] });
-    const logins = new LoginBook({ db, linkableEmail: ownerEmail });
+    const gate = new SignInGate();
+    const logins = new LoginBook({ db });
     const hasher = new PasswordHash();
     const decoy = new DecoyHash({ hasher });
     await decoy.stored();

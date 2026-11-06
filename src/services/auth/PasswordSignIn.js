@@ -1,10 +1,10 @@
 // Decides how one email + password sign-in ends: the user it signs in as, or turned away. After Flask-Login's README
 // login view (look the user up by email, check the password, then login_user), with a hash check instead of its
-// plain-text compare and the same gate as Google, so only the owner gets in.
+// plain-text compare and the same gate as Google.
 //
 // Every way of failing gives the same answer (reason "wrong"), and takes as long: after better-auth's email sign-in,
 // every attempt that gets this far looks the email up and runs argon2 once, against the real hash or a decoy (see
-// DecoyHash). So neither the answer nor its timing tells anyone which emails are the owner's or have a password.
+// DecoyHash). So neither the answer nor its timing tells anyone which emails have an account or a password.
 const TURNED_AWAY = { reason: "wrong" };
 
 // What the login screen shows for every one of them.
@@ -20,7 +20,6 @@ export class PasswordSignIn
         this.decoy = decoy;
       }
 
-    // Everyone is looked up before the gate decides, so the owner's email costs the same lookup as anyone else's.
     async attempt(login)
       {
         if(!login.email() || !login.password()) return TURNED_AWAY;
@@ -30,8 +29,8 @@ export class PasswordSignIn
         return { user: this.publicOf(holder) };
       }
 
-    // The stored hash to check against, or null when this sign-in is turned away whatever the password: not the
-    // owner, nobody by that email, or no argon2 password on the account (Google only).
+    // The stored hash to check against, or null when this sign-in is turned away whatever the password: no email,
+    // nobody by that email, or no argon2 password on the account (Google only).
     hashToCheck(email, holder)
       {
         if(!this.gate.allows(email)) return null;

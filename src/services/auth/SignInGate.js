@@ -1,23 +1,18 @@
-// Who's allowed to sign in. For now that's only the owner (OWNER_EMAIL), so anyone else is turned away before an
-// account is made for them. Opening it up waits until every store takes the signed-in person instead of the owner
-// (piece 3), or a stranger could end up working on the owner's data.
+// Who's allowed to sign in: anyone with an email. Google also has to have checked that email (Twenty's Google strategy
+// and better-auth's account linking both refuse an email Google hasn't checked), since LoginBook goes by the email to
+// find an account that was made with a password.
 export class SignInGate
   {
-    constructor({ emails })
-      {
-        this.emails = emails.map((email) => String(email || "").trim().toLowerCase()).filter(Boolean);
-      }
-
-    // Google has to have checked the email, and it has to be on the list.
+    // Google has to have checked the email.
     admits(account)
       {
         return account.isVerified() && this.allows(account.email());
       }
 
-    // Whether this (lowercase) email is on the list. Email + password sign-in asks this directly: the email is the one
-    // on the account, so there's nobody else to vouch for it.
+    // Whether there's an email to sign in with. Email + password sign-in asks this directly: the email is the one on the
+    // account, so there's nobody else to vouch for it.
     allows(email)
       {
-        return Boolean(email) && this.emails.includes(email);
+        return Boolean(email);
       }
   }

@@ -35,19 +35,18 @@ test("only a real true counts as verified", () =>
 
 // --- SignInGate ---
 
-test("the gate lets in the owner's verified email, whatever its case", () =>
+test("the gate lets in any email Google has checked", () =>
   {
-    const gate = new SignInGate({ emails: [" JOSH@gmail.com "] });
+    const gate = new SignInGate();
     assert.equal(gate.admits(new GoogleAccount(profile())), true);
+    assert.equal(gate.admits(new GoogleAccount(profile({ email: "sam@gmail.com" }))), true);
   });
 
-test("the gate turns away other emails, an unverified owner email, and everyone when OWNER_EMAIL is empty", () =>
+test("the gate turns away an email Google hasn't checked, and a Google account with no email", () =>
   {
-    const gate = new SignInGate({ emails: ["josh@gmail.com"] });
-    assert.equal(gate.admits(new GoogleAccount(profile({ email: "sam@gmail.com" }))), false);
+    const gate = new SignInGate();
     assert.equal(gate.admits(new GoogleAccount(profile({ verified: false }))), false);
     assert.equal(gate.admits(new GoogleAccount(profile({ email: "" }))), false);
-    assert.equal(new SignInGate({ emails: [undefined] }).admits(new GoogleAccount(profile({ email: "" }))), false);
   });
 
 // --- SignIn ---
