@@ -8,7 +8,7 @@ import { SessionLifetime } from "../services/auth/SessionLifetime.js";
 export { WRONG_LOGIN };
 
 // When the failed-try counts can't be read or written. Sign-in stays shut rather than letting guesses through uncounted.
-export const LIMITS_DOWN = "Sign-in isn't available right now. Try again in a minute.";
+export const LIMITS_DOWN = "Please try again in a minute. Sign-in isn't available right now.";
 
 // Sign-in's routes, after passport/todos-express-google's routes/auth.js. Start and callback are plain links the
 // login screen opens, so they send you on (to Google, then to the board or back to /login?signin=error&reason=…)
@@ -128,7 +128,7 @@ export class AuthController
     tooMany(res, seconds)
       {
         res.set("Retry-After", String(seconds));
-        res.status(StatusCodes.TOO_MANY_REQUESTS).json({ message: `Too many sign-in attempts. Try again in ${this.waitWords(seconds)}.` });
+        res.status(StatusCodes.TOO_MANY_REQUESTS).json({ message: `Please wait ${this.waitWords(seconds)} before trying again. There have been too many sign-in attempts.` });
       }
 
     // "a minute", "12 minutes", "1 hour", "24 hours". Rounded up, so it never promises sooner than Retry-After.

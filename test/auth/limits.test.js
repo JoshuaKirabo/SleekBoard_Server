@@ -222,7 +222,7 @@ test("10 wrong passwords get 401; the 11th gets 429 with Retry-After and a plain
         const blocked = await logIn(OWNER.email, "wrong");
         assert.equal(blocked.status, 429);
         assert.equal(blocked.headers.get("retry-after"), String(HOUR));
-        assert.deepEqual(await blocked.json(), { message: "Too many sign-in attempts. Try again in 1 hour." });
+        assert.deepEqual(await blocked.json(), { message: "Please wait 1 hour before trying again. There have been too many sign-in attempts." });
       }
     finally
       {
@@ -293,7 +293,7 @@ test("100 wrong tries from one IP over many emails block that IP for a day, the 
         const tipping = await logIn("someone@example.com", "wrong", "7.7.7.7");
         assert.equal(tipping.status, 429);
         assert.equal(tipping.headers.get("retry-after"), String(DAY));
-        assert.deepEqual(await tipping.json(), { message: "Too many sign-in attempts. Try again in 24 hours." });
+        assert.deepEqual(await tipping.json(), { message: "Please wait 24 hours before trying again. There have been too many sign-in attempts." });
         assert.equal((await logIn(OWNER.email, RIGHT, "7.7.7.7")).status, 429);
         assert.equal((await logIn(OWNER.email, RIGHT, "6.6.6.6")).status, 200);
       }
